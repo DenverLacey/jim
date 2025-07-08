@@ -1,6 +1,6 @@
 # Jim
 
-An immediate mode JSON (de)serialization library that doesn't produce a tree.
+An immediate mode JSON (de)serialization library that doesn't produce a tree. (Based on [Tsoding's C version of the same idea](https://github.com/tsoding/jim).)
 
 Jim doesn't create a tree to work with JSON data, it instead directly generates JSON or directly parses values.
 
@@ -21,7 +21,7 @@ Say we wanted to print this JSON to stdout.
 ```json
 {
   "msg": "Hello world!",
-  "sender": "Alex Jones"
+  "sender": "Alex Smith"
 }
 ```
 
@@ -37,7 +37,7 @@ print_json :: proc() {
         jim.object_member(&se, "msg")
         jim.str(&se, "Hello world!")
         jim.object_member(&se, "sender")
-        jim.str(&se, "Alex Jones")
+        jim.str(&se, "Alex Smith")
     jim.object_end(&se)
 }
 ```
