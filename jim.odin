@@ -242,6 +242,12 @@ peek_char :: proc(d: ^Deserializer) -> (c: rune, ok: bool) {
         return d._peeked_char, true
     }
 
+    if d.input == {} {
+        ok: bool
+        d.input, ok = io.to_reader(os.stream_from_handle(os.stdin))
+        assert(ok)
+    }
+
     r, _, err := io.read_rune(d.input)
     if err != nil {
         return 0, false
