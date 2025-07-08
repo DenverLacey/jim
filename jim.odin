@@ -17,25 +17,25 @@ number        :: proc{serialize_number, deserialize_number}
 str           :: proc{serialize_str, deserialize_str}
 
 Serializer :: struct {
+    _prev: [2]byte,
+    _cur_indent: int,
+    _array_depth: int,
     pp: int,
-    cur_indent: int,
-    array_depth: int,
     out: io.Writer,
-    prev: [2]byte,
 }
 
 serialize_object_begin :: proc(s: ^Serializer) {
     jprintf(s, "{{")
     if s.pp != 0 {
-        s.cur_indent += 1
+        s._cur_indent += 1
     }
 }
 
 serialize_object_end :: proc(s: ^Serializer) {
     if s.pp != 0 {
-        assert(s.cur_indent > 0)
-        s.cur_indent -= 1
-        jprintf(s, "\n%*v", s.cur_indent * s.pp, "")
+        assert(s._cur_indent > 0)
+        s._cur_indent -= 1
+        jprintf(s, "\n%*v", s._cur_indent * s.pp, "")
     }
     jprintf(s, "}}")
 }
@@ -43,28 +43,28 @@ serialize_object_end :: proc(s: ^Serializer) {
 serialize_array_begin :: proc(s: ^Serializer) {
     jprintf(s, "[")
     if s.pp != 0 {
-        s.cur_indent += 1
+        s._cur_indent += 1
     }
-    s.array_depth += 1
+    s._array_depth += 1
 }
 
 serialize_array_end :: proc(s: ^Serializer) {
     if s.pp != 0 {
-        assert(s.cur_indent > 0)
-        s.cur_indent -= 1
-        jprintf(s, "\n%*v", s.cur_indent * s.pp, "")
+        assert(s._cur_indent > 0)
+        s._cur_indent -= 1
+        jprintf(s, "\n%*v", s._cur_indent * s.pp, "")
     }
     jprintf(s, "]")
-    s.array_depth -= 1
+    s._array_depth -= 1
 }
 
 serialize_object_member :: proc(s: ^Serializer, key: string) {
-    if needs_comma(s.prev) {
+    if needs_comma(s._prev) {
         jprintf(s, ",")
     }
 
     if s.pp != 0 {
-        jprintf(s, "\n%*v\"%v\": ", s.cur_indent * s.pp, "", key)
+        jprintf(s, "\n%*v\"%v\": ", s._cur_indent * s.pp, "", key)
     } else {
         jprintf(s, "\"%v\":", key)
     }
@@ -100,11 +100,11 @@ jprintf :: proc(s: ^Serializer, format: string, args: ..any) {
     }
 
     if len(r) == 1 {
-        s.prev[0] = s.prev[1]
-        s.prev[1] = r[0]
+        s._prev[0] = s._prev[1]
+        s._prev[1] = r[0]
     } else {
-        s.prev[0] = r[len(r) - 2]
-        s.prev[1] = r[len(r) - 1]
+        s._prev[0] = r[len(r) - 2]
+        s._prev[1] = r[len(r) - 1]
     }
 
     if s.out == {} {
@@ -124,23 +124,23 @@ needs_comma :: proc(buf: [2]byte) -> bool {
 
 @(private)
 format_for_array_if_needed :: proc(s: ^Serializer) {
-    if s.array_depth <= 0 {
+    if s._array_depth <= 0 {
         return
     }
 
-    if needs_comma(s.prev) {
+    if needs_comma(s._prev) {
         jprintf(s, ",")
     }
 
     if s.pp != 0 {
-        jprintf(s, "\n%*v", s.cur_indent * s.pp, "")
+        jprintf(s, "\n%*v", s._cur_indent * s.pp, "")
     }
 }
 
 Deserializer :: struct {
+    _peeked: bool,
+    _peeked_char: rune,
     input: io.Reader,
-    peeked_char: rune,
-    peeked: bool,
 }
 
 deserialize_object_begin :: proc(d: ^Deserializer) -> bool {
@@ -165,15 +165,15 @@ deserialize_array_end :: proc(d: ^Deserializer) -> bool {
 
 is_object_end :: proc(d: ^Deserializer) -> bool {
     c := skip_whitespace(d) or_return
-    d.peeked_char = c
-    d.peeked = true
+    d._peeked_char = c
+    d._peeked = true
     return c == '}'
 }
 
 is_array_end :: proc(d: ^Deserializer) -> bool {
     c := skip_whitespace(d) or_return
-    d.peeked_char = c
-    d.peeked = true
+    d._peeked_char = c
+    d._peeked = true
     return c == ']'
 }
 
@@ -238,8 +238,8 @@ Token :: struct {
 
 @(private)
 peek_char :: proc(d: ^Deserializer) -> (c: rune, ok: bool) {
-    if d.peeked {
-        return d.peeked_char, true
+    if d._peeked {
+        return d._peeked_char, true
     }
 
     r, _, err := io.read_rune(d.input)
@@ -247,15 +247,15 @@ peek_char :: proc(d: ^Deserializer) -> (c: rune, ok: bool) {
         return 0, false
     }
 
-    d.peeked_char = r
-    d.peeked = true
+    d._peeked_char = r
+    d._peeked = true
     return r, true
 }
 
 @(private)
 next_char :: proc(d: ^Deserializer) -> (c: rune, ok: bool) {
     c = peek_char(d) or_return
-    d.peeked = false
+    d._peeked = false
     return c, true
 }
 
@@ -275,8 +275,8 @@ eat_char :: proc(d: ^Deserializer, ch: rune) -> (ok: bool) {
     if c == ch {
         return true
     }
-    d.peeked_char = c
-    d.peeked = true
+    d._peeked_char = c
+    d._peeked = true
     return true
 }
 
