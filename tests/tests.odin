@@ -1,4 +1,4 @@
-package tests
+package jim_tests
 
 import "core:testing"
 import "core:strings"

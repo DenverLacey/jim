@@ -163,6 +163,20 @@ deserialize_array_end :: proc(d: ^Deserializer) -> bool {
     return ok
 }
 
+is_object_end :: proc(d: ^Deserializer) -> bool {
+    c := skip_whitespace(d) or_return
+    d.peeked_char = c
+    d.peeked = true
+    return c == '}'
+}
+
+is_array_end :: proc(d: ^Deserializer) -> bool {
+    c := skip_whitespace(d) or_return
+    d.peeked_char = c
+    d.peeked = true
+    return c == ']'
+}
+
 deserialize_object_member :: proc(d: ^Deserializer) -> (key: string, ok: bool) {
     key = deserialize_str(d) or_return
     expect(d, .COLON) or_return

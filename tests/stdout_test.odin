@@ -1,4 +1,4 @@
-package tests
+package jim_tests
 
 import "core:fmt"
 import "core:time"
@@ -15,13 +15,15 @@ main :: proc() {
     dt = timezone.datetime_to_tz(dt, tz)
     ts, _ := time.datetime_to_time(dt)
 
-    ser := jim.Serializer{pp=2}
-    jim.object_begin(&ser)
-        jim.object_member(&ser, "msg")
-        jim.str(&ser, "hello world")
-        jim.object_member(&ser, "time")
-        jim.str(&ser, time.to_string_hms(ts, strbuf[:]))
-    jim.object_end(&ser)
+    se := jim.Serializer{pp=2}
+    jim.object_begin(&se)
+        jim.object_member(&se, "msg")
+        jim.str(&se, "hello world")
+        jim.object_member(&se, "time")
+        jim.str(&se, time.to_string_hms(ts, strbuf[:]))
+    jim.object_end(&se)
     fmt.println()
+
+    json.parse()
 }
 
