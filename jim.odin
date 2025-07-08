@@ -1,5 +1,6 @@
 package jim
 
+import "core:strconv"
 import "core:fmt"
 import "core:io"
 import "core:os"
@@ -137,45 +138,62 @@ format_for_array_if_needed :: proc(s: ^Serializer) {
 }
 
 Deserializer :: struct {
-    bytes: io.Reader,
+    input: io.Reader,
+    peeked_char: rune,
+    peeked: bool,
 }
 
 deserialize_object_begin :: proc(d: ^Deserializer) -> bool {
-    _, ok := expect(d.bytes, .OCURLY)
+    _, ok := expect(d, .OCURLY)
     return ok
 }
 
 deserialize_object_end :: proc(d: ^Deserializer) -> bool {
-    _, ok := expect(d.bytes, .CCURLY)
+    _, ok := expect(d, .CCURLY)
     return ok
 }
 
 deserialize_array_begin :: proc(d: ^Deserializer) -> bool {
-    _, ok := expect(d.bytes, .OBRACKET)
+    _, ok := expect(d, .OBRACKET)
     return ok
 }
 
 deserialize_array_end :: proc(d: ^Deserializer) -> bool {
-    _, ok := expect(d.bytes, .CBRACKET)
+    _, ok := expect(d, .CBRACKET)
     return ok
 }
 
 deserialize_object_member :: proc(d: ^Deserializer) -> (key: string, ok: bool) {
     key = deserialize_str(d) or_return
-    expect(d.bytes, .COLON) or_return
+    expect(d, .COLON) or_return
     return key, true
 }
 
 deserialize_boolean :: proc(d: ^Deserializer) -> (value: bool, ok: bool) {
-    unimplemented()
+    tok := next_token(d) or_return
+    eat_char(d, ',') or_return
+
+    #partial switch tok.kind {
+    case .TRUE:
+        return true, true
+    case .FALSE:
+        return false, true
+    case:
+        return false, false
+    }
 }
 
 deserialize_number :: proc(d: ^Deserializer) -> (value: f64, ok: bool) {
-    unimplemented()
+    tok := expect(d, .NUMBER) or_return
+    eat_char(d, ',') or_return
+
+    value = strconv.atof(string(tok.text[:tok.len]))
+    return value, true
 }
 
 deserialize_str :: proc(d: ^Deserializer) -> (value: string, ok: bool) {
-    tok := expect(d.bytes, .STRING) or_return
+    tok := expect(d, .STRING) or_return
+    eat_char(d, ',') or_return
     res, err := strings.clone(string(tok.text[:tok.len]))
     if err != nil {
         return "", false
@@ -205,12 +223,32 @@ Token :: struct {
 }
 
 @(private)
-skip_whitespace :: proc(r: io.Reader) -> (c: rune, ok: bool) {
+peek_char :: proc(d: ^Deserializer) -> (c: rune, ok: bool) {
+    if d.peeked {
+        return d.peeked_char, true
+    }
+
+    r, _, err := io.read_rune(d.input)
+    if err != nil {
+        return 0, false
+    }
+
+    d.peeked_char = r
+    d.peeked = true
+    return r, true
+}
+
+@(private)
+next_char :: proc(d: ^Deserializer) -> (c: rune, ok: bool) {
+    c = peek_char(d) or_return
+    d.peeked = false
+    return c, true
+}
+
+@(private)
+skip_whitespace :: proc(d: ^Deserializer) -> (c: rune, ok: bool) {
     for {
-        c, _, err := io.read_rune(r);
-        if err != nil {
-            return 0, false
-        }
+        c = next_char(d) or_return
         if !unicode.is_white_space(c) {
             return c, true
         }
@@ -218,8 +256,19 @@ skip_whitespace :: proc(r: io.Reader) -> (c: rune, ok: bool) {
 }
 
 @(private)
-next_token :: proc(r: io.Reader) -> (token: Token, ok: bool) {
-    c, scs := skip_whitespace(r)
+eat_char :: proc(d: ^Deserializer, ch: rune) -> (ok: bool) {
+    c := skip_whitespace(d) or_return
+    if c == ch {
+        return true
+    }
+    d.peeked_char = c
+    d.peeked = true
+    return true
+}
+
+@(private)
+next_token :: proc(d: ^Deserializer) -> (token: Token, ok: bool) {
+    c, scs := skip_whitespace(d)
     if !scs {
         return {}, false
     }
@@ -240,10 +289,7 @@ next_token :: proc(r: io.Reader) -> (token: Token, ok: bool) {
     case '"':
         sb := strings.builder_from_bytes(token.text[:])
         for { 
-            c, _, err := io.read_rune(r);
-            if err != nil {
-                return {}, false
-            }
+            c := next_char(d) or_return
             if c == '"' {
                 break
             }
@@ -257,10 +303,60 @@ next_token :: proc(r: io.Reader) -> (token: Token, ok: bool) {
             token.text[i] = s[i]
         }
     case:
+        sb := strings.builder_from_bytes(token.text[:])
+
+        _, err := strings.write_rune(&sb, c)
+        if err != nil {
+            return token, false
+        }
+
         if unicode.is_letter(c) {
-            unimplemented()
+            for {
+                c := peek_char(d) or_return
+                if !unicode.is_letter(c) {
+                    break
+                }
+
+                _, err = strings.write_rune(&sb, c)
+                if err != nil {
+                    return token, false
+                }
+
+                next_char(d)
+            }
+
+            token.len = strings.builder_len(sb)
+            switch string(token.text[:token.len]) {
+            case "null":
+                token.kind = .NULL
+            case "true":
+                token.kind = .TRUE
+            case "false":
+                token.kind = .FALSE
+            case:
+                return token, false
+            }
         } else if unicode.is_digit(c) {
-            unimplemented()
+            dot := false
+            for {
+                c := peek_char(d) or_return
+
+                if c == '.' && !dot {
+                    dot = true
+                } else if !unicode.is_digit(c) {
+                    break
+                }
+
+                _, err = strings.write_rune(&sb, c)
+                if err != nil {
+                    return token, false
+                }
+
+                next_char(d)
+            }
+
+            token.kind = .NUMBER
+            token.len = strings.builder_len(sb)
         } else {
             unimplemented()
         }
@@ -270,8 +366,8 @@ next_token :: proc(r: io.Reader) -> (token: Token, ok: bool) {
 }
 
 @(private)
-expect :: proc(r: io.Reader, kind: TokenKind) -> (token: Token, ok: bool) {
-    token = next_token(r) or_return
+expect :: proc(d: ^Deserializer, kind: TokenKind) -> (token: Token, ok: bool) {
+    token = next_token(d) or_return
     return token, token.kind == kind
 }
 
