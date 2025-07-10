@@ -40,13 +40,13 @@ serialize_object :: proc(t: ^testing.T) {
     se := jim.Serializer{out=strings.to_writer(&sb)}
 
     jim.object_begin(&se)
-        jim.object_member(&se, "x")
+        jim.key(&se, "x")
         jim.null(&se)
-        jim.object_member(&se, "y")
+        jim.key(&se, "y")
         jim.boolean(&se, true)
-        jim.object_member(&se, "z")
+        jim.key(&se, "z")
         jim.number(&se, 3.14)
-        jim.object_member(&se, "w")
+        jim.key(&se, "w")
         jim.str(&se, "hello")
     jim.object_end(&se)
 
@@ -62,13 +62,13 @@ serialize_object_pp :: proc(t: ^testing.T) {
     se := jim.Serializer{out=strings.to_writer(&sb), pp=4}
 
     jim.object_begin(&se)
-        jim.object_member(&se, "x")
+        jim.key(&se, "x")
         jim.null(&se)
-        jim.object_member(&se, "y")
+        jim.key(&se, "y")
         jim.boolean(&se, true)
-        jim.object_member(&se, "z")
+        jim.key(&se, "z")
         jim.number(&se, 3.14)
-        jim.object_member(&se, "w")
+        jim.key(&se, "w")
         jim.str(&se, "hello")
     jim.object_end(&se)
 
@@ -148,17 +148,17 @@ serialize_nested :: proc(t: ^testing.T) {
     se := jim.Serializer{out=strings.to_writer(&sb)}
 
     jim.object_begin(&se)
-        jim.object_member(&se, "array")
+        jim.key(&se, "array")
         jim.array_begin(&se)
             jim.number(&se, 1)
             jim.number(&se, 2)
             jim.number(&se, 3)
         jim.array_end(&se)
-        jim.object_member(&se, "obj")
+        jim.key(&se, "obj")
         jim.object_begin(&se)
-            jim.object_member(&se, "name")
+            jim.key(&se, "name")
             jim.str(&se, "John Smith")
-            jim.object_member(&se, "age")
+            jim.key(&se, "age")
             jim.number(&se, 32)
         jim.object_end(&se)
     jim.object_end(&se)
@@ -175,17 +175,17 @@ serialize_nested_pp :: proc(t: ^testing.T) {
     se := jim.Serializer{out=strings.to_writer(&sb), pp=4}
 
     jim.object_begin(&se)
-        jim.object_member(&se, "array")
+        jim.key(&se, "array")
         jim.array_begin(&se)
             jim.number(&se, 1)
             jim.number(&se, 2)
             jim.number(&se, 3)
         jim.array_end(&se)
-        jim.object_member(&se, "obj")
+        jim.key(&se, "obj")
         jim.object_begin(&se)
-            jim.object_member(&se, "name")
+            jim.key(&se, "name")
             jim.str(&se, "John Smith")
-            jim.object_member(&se, "age")
+            jim.key(&se, "age")
             jim.number(&se, 32)
         jim.object_end(&se)
     jim.object_end(&se)
@@ -202,6 +202,27 @@ serialize_nested_pp :: proc(t: ^testing.T) {
         "age": 32
     }
 }`)
+}
+
+@(test)
+serialize_object_auto :: proc(t: ^testing.T) {
+    Foo :: struct {
+        number: f64,
+        boolean: bool,
+        str: string,
+    }
+
+    foo := Foo{5, true, "I'm a foo"}
+
+    sb := strings.Builder{}
+    defer strings.builder_destroy(&sb)
+
+    se := jim.Serializer{out=strings.to_writer(&sb)}
+
+    jim.object(&se, foo)
+
+    json := strings.to_string(sb)
+    testing.expect_value(t, json, `{"number":5,"boolean":true,"str":"I'm a foo"}`)
 }
 
 @(test)
@@ -238,7 +259,7 @@ deserialize_object :: proc(t: ^testing.T) {
 
     {
         key: string
-        key, ok = jim.object_member(&de)
+        key, ok = jim.key(&de)
         testing.expect(t, ok, "Failed to find key of object")
         testing.expect_value(t, key, "msg")
         delete(key)
@@ -252,7 +273,7 @@ deserialize_object :: proc(t: ^testing.T) {
 
     {
         key: string
-        key, ok = jim.object_member(&de)
+        key, ok = jim.key(&de)
         testing.expect(t, ok, "Failed to find key of object")
         testing.expect_value(t, key, "loggedIn")
         delete(key)
@@ -265,7 +286,7 @@ deserialize_object :: proc(t: ^testing.T) {
 
     {
         key: string
-        key, ok = jim.object_member(&de)
+        key, ok = jim.key(&de)
         testing.expect(t, ok, "Failed to find key of object")
         testing.expect_value(t, key, "gold")
         delete(key)
@@ -290,7 +311,7 @@ deserialize_object_pp :: proc(t: ^testing.T) {
 
     {
         key: string
-        key, ok = jim.object_member(&de)
+        key, ok = jim.key(&de)
         testing.expect(t, ok, "Failed to find key of object")
         testing.expect_value(t, key, "msg")
         delete(key)
@@ -304,7 +325,7 @@ deserialize_object_pp :: proc(t: ^testing.T) {
 
     {
         key: string
-        key, ok = jim.object_member(&de)
+        key, ok = jim.key(&de)
         testing.expect(t, ok, "Failed to find key of object")
         testing.expect_value(t, key, "loggedIn")
         delete(key)
@@ -317,7 +338,7 @@ deserialize_object_pp :: proc(t: ^testing.T) {
 
     {
         key: string
-        key, ok = jim.object_member(&de)
+        key, ok = jim.key(&de)
         testing.expect(t, ok, "Failed to find key of object")
         testing.expect_value(t, key, "gold")
         delete(key)

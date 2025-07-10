@@ -13,7 +13,7 @@ Object :: struct {
 parse_object_json :: proc(de: ^jim.Deserializer) -> (res: Object, ok: bool) {
     jim.object_begin(de) or_return
     for !jim.is_object_end(de) {
-        key := jim.object_member(de) or_return
+        key := jim.key(de) or_return
         defer delete(key)
 
         switch key {

@@ -1,20 +1,23 @@
 package jim
 
+import "base:runtime"
 import "core:strconv"
 import "core:fmt"
 import "core:io"
 import "core:os"
+import "core:reflect"
 import "core:strings"
 import "core:unicode"
 
-object_begin  :: proc{serialize_object_begin, deserialize_object_begin}
-object_end    :: proc{serialize_object_end, deserialize_object_end}
-array_begin   :: proc{serialize_array_begin, deserialize_array_begin}
-array_end     :: proc{serialize_array_end, deserialize_array_end}
-object_member :: proc{serialize_object_member, deserialize_object_member}
-boolean       :: proc{serialize_boolean, deserialize_boolean}
-number        :: proc{serialize_number, deserialize_number}
-str           :: proc{serialize_str, deserialize_str}
+object_begin :: proc{serialize_object_begin, deserialize_object_begin}
+object_end   :: proc{serialize_object_end, deserialize_object_end}
+array_begin  :: proc{serialize_array_begin, deserialize_array_begin}
+array_end    :: proc{serialize_array_end, deserialize_array_end}
+key          :: proc{serialize_key, deserialize_key}
+boolean      :: proc{serialize_boolean, deserialize_boolean}
+number       :: proc{serialize_number, deserialize_number}
+str          :: proc{serialize_str, deserialize_str}
+object       :: proc{serialize_object, deserialize_object}
 
 Serializer :: struct {
     _prev: [2]byte,
@@ -58,7 +61,7 @@ serialize_array_end :: proc(s: ^Serializer) {
     s._array_depth -= 1
 }
 
-serialize_object_member :: proc(s: ^Serializer, key: string) {
+serialize_key :: proc(s: ^Serializer, key: string) {
     if needs_comma(s._prev) {
         jprintf(s, ",")
     }
@@ -88,6 +91,46 @@ serialize_number :: proc(s: ^Serializer, value: f64) {
 serialize_str :: proc(s: ^Serializer, value: string) {
     format_for_array_if_needed(s)
     jprintf(s, "%w", value)
+}
+
+serialize_object :: proc(s: ^Serializer, value: $T) -> (ok: bool) {
+    ti := type_info_of(T)
+    assert(reflect.is_struct(ti))
+    ts := reflect.type_info_base(ti).variant.(runtime.Type_Info_Struct)
+
+    object_begin(s)
+    for i in 0..<ts.field_count {
+        key(s, ts.names[i])
+        field := reflect.struct_field_at(T, int(i))
+        #partial switch _ in field.type.variant {
+        case runtime.Type_Info_Boolean:
+            field_value := reflect.struct_field_value(value, field).(bool)
+            boolean(s, field_value)
+        case runtime.Type_Info_Rune:
+            unimplemented()
+        case runtime.Type_Info_Integer:
+            unimplemented()
+        case runtime.Type_Info_Float:
+            field_value := reflect.struct_field_value(value, field).(f64)
+            number(s, field_value)
+        case runtime.Type_Info_String:
+            field_value := reflect.struct_field_value(value, field).(string)
+            str(s, field_value)
+        case runtime.Type_Info_Array:
+            unimplemented()
+        case runtime.Type_Info_Dynamic_Array:
+            unimplemented()
+        case runtime.Type_Info_Slice:
+            unimplemented()
+        case runtime.Type_Info_Struct:
+            unimplemented()
+        case:
+            fmt.printfln("Error: Cannot serialize a struct with a field of type `%v`.", field.type.id)
+            return false
+        }
+    }
+    object_end(s)
+    return true
 }
 
 @(private)
@@ -177,7 +220,7 @@ is_array_end :: proc(d: ^Deserializer) -> bool {
     return c == ']'
 }
 
-deserialize_object_member :: proc(d: ^Deserializer) -> (key: string, ok: bool) {
+deserialize_key :: proc(d: ^Deserializer) -> (key: string, ok: bool) {
     key = deserialize_str(d) or_return
     expect(d, .COLON) or_return
     return key, true
@@ -213,6 +256,10 @@ deserialize_str :: proc(d: ^Deserializer) -> (value: string, ok: bool) {
         return "", false
     }
     return res, true
+}
+
+deserialize_object :: proc(d: ^Deserializer, $T: typeid) -> (value: T, ok: bool) {
+    unimplemented()
 }
 
 TokenKind :: enum {
