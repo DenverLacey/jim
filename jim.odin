@@ -1,11 +1,11 @@
 package jim
 
 import "base:runtime"
-import "core:strconv"
 import "core:fmt"
 import "core:io"
 import "core:os"
 import "core:reflect"
+import "core:strconv"
 import "core:strings"
 import "core:unicode"
 
@@ -20,11 +20,11 @@ str          :: proc{serialize_str, deserialize_str}
 object       :: proc{serialize_object, deserialize_object}
 
 Serializer :: struct {
-    _prev: [2]byte,
-    _cur_indent: int,
-    _array_depth: int,
-    pp: int,
     out: io.Writer,
+    pp: u16,
+    _cur_indent: u16,
+    _array_depth: u16,
+    _prev: byte,
 }
 
 serialize_object_begin :: proc(s: ^Serializer) {
@@ -135,6 +135,12 @@ serialize_object :: proc(s: ^Serializer, value: $T) -> (ok: bool) {
 
 @(private)
 jprintf :: proc(s: ^Serializer, format: string, args: ..any) {
+    if s.out == {} {
+        ok: bool
+        s.out, ok = io.to_writer(os.stream_from_handle(os.stdout))
+        assert(ok)
+    }
+
     bytes: [256]byte
     sb := strings.builder_from_bytes(bytes[:])
     r := fmt.sbprintf(&sb, format, ..args)
@@ -142,27 +148,13 @@ jprintf :: proc(s: ^Serializer, format: string, args: ..any) {
         return
     }
 
-    if len(r) == 1 {
-        s._prev[0] = s._prev[1]
-        s._prev[1] = r[0]
-    } else {
-        s._prev[0] = r[len(r) - 2]
-        s._prev[1] = r[len(r) - 1]
-    }
-
-    if s.out == {} {
-        ok: bool
-        s.out, ok = io.to_writer(os.stream_from_handle(os.stdout))
-        assert(ok)
-    }
-
+    s._prev = r[len(r) - 1]
     io.write_string(s.out, r)
 }
 
 @(private)
-needs_comma :: proc(buf: [2]byte) -> bool {
-    b := buf
-    return b[1] != '{' && b[1] != '[' && b[1] != 0 && string(b[:]) != "{\n" && string(b[:]) != "[\n"
+needs_comma :: proc(prev: byte) -> bool {
+    return prev != '{' && prev != '[' && prev != '\n' && prev != 0
 }
 
 @(private)
@@ -181,9 +173,9 @@ format_for_array_if_needed :: proc(s: ^Serializer) {
 }
 
 Deserializer :: struct {
-    _peeked: bool,
-    _peeked_char: rune,
     input: io.Reader,
+    _peeked_char: rune,
+    _peeked: bool,
 }
 
 deserialize_object_begin :: proc(d: ^Deserializer) -> bool {
