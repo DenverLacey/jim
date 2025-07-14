@@ -205,24 +205,51 @@ serialize_nested_pp :: proc(t: ^testing.T) {
 }
 
 @(test)
-serialize_object_auto :: proc(t: ^testing.T) {
+serialize_object_auto_primitive :: proc(t: ^testing.T) {
     Foo :: struct {
+        char: rune,
         number: f64,
         boolean: bool,
         str: string,
     }
 
-    foo := Foo{5, true, "I'm a foo"}
+    foo := Foo{'K', 5, true, "I'm a foo"}
 
     sb := strings.Builder{}
     defer strings.builder_destroy(&sb)
 
     se := jim.Serializer{out=strings.to_writer(&sb)}
 
-    jim.object(&se, foo)
-
+    ok := jim.object(&se, foo)
     json := strings.to_string(sb)
-    testing.expect_value(t, json, `{"number":5,"boolean":true,"str":"I'm a foo"}`)
+
+    testing.expect(t, ok, "Failed to serialize object")
+    testing.expect_value(t, json, `{"char":"K","number":5,"boolean":true,"str":"I'm a foo"}`)
+}
+
+@(test)
+serialize_object_auto_nested :: proc(t: ^testing.T) {
+    Foo :: struct {
+        name: string,
+        obj: Bar,
+    }
+
+    Bar :: struct {
+        name: string,
+    }
+
+    foo := Foo{"foo", {"bar"}}
+
+    sb := strings.Builder{}
+    defer strings.builder_destroy(&sb)
+
+    se := jim.Serializer{out=strings.to_writer(&sb)}
+
+    ok := jim.object(&se, foo)
+    json := strings.to_string(sb)
+
+    testing.expect(t, ok, "Failed to serialize object")
+    testing.expect_value(t, json, `{"name":"foo","obj":{"name":"bar"}}`)
 }
 
 @(test)

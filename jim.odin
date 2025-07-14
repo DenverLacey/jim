@@ -95,26 +95,41 @@ serialize_str :: proc(s: ^Serializer, value: string) {
 
 serialize_object :: proc(s: ^Serializer, value: $T) -> (ok: bool) {
     ti := type_info_of(T)
-    assert(reflect.is_struct(ti))
-    ts := reflect.type_info_base(ti).variant.(runtime.Type_Info_Struct)
+    ts := reflect.type_info_base(ti).variant.(runtime.Type_Info_Struct) or_return
+    return serialize_object_info(s, ts, value)
+}
 
+@(private)
+serialize_object_info :: proc(s: ^Serializer, info: runtime.Type_Info_Struct, value: any) -> (ok: bool) {
     object_begin(s)
-    for i in 0..<ts.field_count {
-        key(s, ts.names[i])
-        field := reflect.struct_field_at(T, int(i))
-        #partial switch _ in field.type.variant {
+    for i in 0..<info.field_count {
+        field := reflect.Struct_Field {
+            name = info.names[i],
+            type = info.types[i],
+            tag = reflect.Struct_Tag(info.tags[i]),
+            offset = info.offsets[i],
+            is_using = info.usings[i],
+        }
+
+        key(s, field.name)
+        bti := reflect.type_info_base(info.types[i])
+        #partial switch fti in bti.variant {
         case runtime.Type_Info_Boolean:
-            field_value := reflect.struct_field_value(value, field).(bool)
+            field_value := reflect.struct_field_value(value, field).(bool) or_return
             boolean(s, field_value)
         case runtime.Type_Info_Rune:
-            unimplemented()
+            field_value := reflect.struct_field_value(value, field).(rune) or_return
+            buf: [4]byte
+            sb := strings.builder_from_bytes(buf[:])
+            strings.write_rune(&sb, field_value)
+            str(s, strings.to_string(sb))
         case runtime.Type_Info_Integer:
             unimplemented()
         case runtime.Type_Info_Float:
-            field_value := reflect.struct_field_value(value, field).(f64)
+            field_value := reflect.struct_field_value(value, field).(f64) or_return
             number(s, field_value)
         case runtime.Type_Info_String:
-            field_value := reflect.struct_field_value(value, field).(string)
+            field_value := reflect.struct_field_value(value, field).(string) or_return
             str(s, field_value)
         case runtime.Type_Info_Array:
             unimplemented()
@@ -123,13 +138,14 @@ serialize_object :: proc(s: ^Serializer, value: $T) -> (ok: bool) {
         case runtime.Type_Info_Slice:
             unimplemented()
         case runtime.Type_Info_Struct:
-            unimplemented()
+            serialize_object_info(s, fti, reflect.struct_field_value(value, field))
         case:
             fmt.printfln("Error: Cannot serialize a struct with a field of type `%v`.", field.type.id)
             return false
         }
     }
     object_end(s)
+
     return true
 }
 
