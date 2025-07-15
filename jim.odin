@@ -1,5 +1,6 @@
 package jim
 
+import "base:intrinsics"
 import "base:runtime"
 import "core:fmt"
 import "core:io"
@@ -16,7 +17,7 @@ array_end    :: proc{serialize_array_end, deserialize_array_end}
 key          :: proc{serialize_key, deserialize_key}
 boolean      :: proc{serialize_boolean, deserialize_boolean}
 number       :: proc{serialize_number, deserialize_number}
-str          :: proc{serialize_str, deserialize_str}
+str          :: proc{serialize_str, serialize_enum_str, deserialize_str, deserialize_enum_str}
 object       :: proc{serialize_object, deserialize_object}
 
 Serializer :: struct {
@@ -93,14 +94,25 @@ serialize_str :: proc(s: ^Serializer, value: string) {
     jprintf(s, "%w", value)
 }
 
-serialize_object :: proc(s: ^Serializer, value: $T) -> (ok: bool) {
+serialize_enum_str :: proc(s: ^Serializer, value: $E)
+    where intrinsics.type_is_enum(E)
+{
+    e_info := reflect.type_info_base(type_info_of(E)).variant.(Type_Info_Enum)
+    name := reflect.enum_name_from_value(value)
+    str(s, name)
+}
+
+serialize_object :: proc(s: ^Serializer, value: $T, caller := #caller_location) {
+    if !type_is_serializable_object(type_info_of(T)) {
+        panic("Tried to serialize an object that cannot be serialized.", caller)
+    }
     ti := type_info_of(T)
-    ts := reflect.type_info_base(ti).variant.(runtime.Type_Info_Struct) or_return
-    return serialize_object_info(s, ts, value)
+    ts := reflect.type_info_base(ti).variant.(runtime.Type_Info_Struct)
+    serialize_object_info(s, ts, value)
 }
 
 @(private)
-serialize_object_info :: proc(s: ^Serializer, info: runtime.Type_Info_Struct, value: any) -> (ok: bool) {
+serialize_object_info :: proc(s: ^Serializer, info: runtime.Type_Info_Struct, value: any) {
     object_begin(s)
     for i in 0..<info.field_count {
         field := reflect.Struct_Field {
@@ -115,10 +127,10 @@ serialize_object_info :: proc(s: ^Serializer, info: runtime.Type_Info_Struct, va
         bti := reflect.type_info_base(info.types[i])
         #partial switch fti in bti.variant {
         case runtime.Type_Info_Boolean:
-            field_value := reflect.struct_field_value(value, field).(bool) or_return
+            field_value := reflect.struct_field_value(value, field).(bool)
             boolean(s, field_value)
         case runtime.Type_Info_Rune:
-            field_value := reflect.struct_field_value(value, field).(rune) or_return
+            field_value := reflect.struct_field_value(value, field).(rune)
             buf: [4]byte
             sb := strings.builder_from_bytes(buf[:])
             strings.write_rune(&sb, field_value)
@@ -126,10 +138,10 @@ serialize_object_info :: proc(s: ^Serializer, info: runtime.Type_Info_Struct, va
         case runtime.Type_Info_Integer:
             unimplemented()
         case runtime.Type_Info_Float:
-            field_value := reflect.struct_field_value(value, field).(f64) or_return
+            field_value := reflect.struct_field_value(value, field).(f64)
             number(s, field_value)
         case runtime.Type_Info_String:
-            field_value := reflect.struct_field_value(value, field).(string) or_return
+            field_value := reflect.struct_field_value(value, field).(string)
             str(s, field_value)
         case runtime.Type_Info_Array:
             unimplemented()
@@ -139,14 +151,16 @@ serialize_object_info :: proc(s: ^Serializer, info: runtime.Type_Info_Struct, va
             unimplemented()
         case runtime.Type_Info_Struct:
             serialize_object_info(s, fti, reflect.struct_field_value(value, field))
+        case runtime.Type_Info_Enum:
+            field_value := reflect.struct_field_value(value, field)
+            name, ok := reflect.enum_name_from_value_any(field_value)
+            assert(ok)
+            str(s, name)
         case:
-            fmt.printfln("Error: Cannot serialize a struct with a field of type `%v`.", field.type.id)
-            return false
+            unreachable()
         }
     }
     object_end(s)
-
-    return true
 }
 
 @(private)
@@ -186,6 +200,42 @@ format_for_array_if_needed :: proc(s: ^Serializer) {
     if s.pp != 0 {
         jprintf(s, "\n%*v", s._cur_indent * s.pp, "")
     }
+}
+
+@(private)
+type_is_serializable_object :: proc(T: ^runtime.Type_Info) -> bool {
+    if !reflect.is_struct(reflect.type_info_base(T)) {
+        return false
+    }
+
+    ti := reflect.type_info_base(T).variant.(runtime.Type_Info_Struct)
+    for i in 0..<ti.field_count {
+        field_type := reflect.type_info_base(ti.types[i])
+        #partial switch field_info in field_type.variant {
+        case runtime.Type_Info_Boolean:
+        case runtime.Type_Info_Rune:
+        case runtime.Type_Info_Integer:
+        case runtime.Type_Info_Float:
+        case runtime.Type_Info_String:
+        case runtime.Type_Info_Array:
+            unimplemented()
+        case runtime.Type_Info_Dynamic_Array:
+            unimplemented()
+        case runtime.Type_Info_Slice:
+            unimplemented()
+        case runtime.Type_Info_Struct:
+            ok := type_is_serializable_object(field_type)
+            if !ok {
+                return false
+            }
+        case runtime.Type_Info_Enum:
+        case:
+            fmt.eprintfln("Error: Cannot serialize an object with a field of type `%t`", field_type.id)
+            return false
+        }
+    }
+
+    return true
 }
 
 Deserializer :: struct {
@@ -264,6 +314,14 @@ deserialize_str :: proc(d: ^Deserializer) -> (value: string, ok: bool) {
         return "", false
     }
     return res, true
+}
+
+deserialize_enum_str :: proc(d: ^Deserializer, $E: typeid) -> (value: E, ok: bool)
+    where intrinsics.type_is_enum(E)
+{
+    name := str(d) or_return
+    defer delete(name)
+    return reflect.enum_from_name(E, name)
 }
 
 deserialize_object :: proc(d: ^Deserializer, $T: typeid) -> (value: T, ok: bool) {

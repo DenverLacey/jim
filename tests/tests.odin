@@ -220,10 +220,9 @@ serialize_object_auto_primitive :: proc(t: ^testing.T) {
 
     se := jim.Serializer{out=strings.to_writer(&sb)}
 
-    ok := jim.object(&se, foo)
+    jim.object(&se, foo)
     json := strings.to_string(sb)
 
-    testing.expect(t, ok, "Failed to serialize object")
     testing.expect_value(t, json, `{"char":"K","number":5,"boolean":true,"str":"I'm a foo"}`)
 }
 
@@ -245,11 +244,36 @@ serialize_object_auto_nested :: proc(t: ^testing.T) {
 
     se := jim.Serializer{out=strings.to_writer(&sb)}
 
-    ok := jim.object(&se, foo)
+    jim.object(&se, foo)
     json := strings.to_string(sb)
 
-    testing.expect(t, ok, "Failed to serialize object")
     testing.expect_value(t, json, `{"name":"foo","obj":{"name":"bar"}}`)
+}
+
+@(test)
+serialize_object_auto_enum :: proc(t: ^testing.T) {
+    Fruit :: enum {
+        Apple,
+        Banana,
+        Cherry,
+    }
+
+    Foo :: struct {
+        fruit: Fruit,
+        qty: f64,
+    }
+
+    foo := Foo{.Banana, 23}
+
+    sb := strings.Builder{}
+    defer strings.builder_destroy(&sb)
+
+    se := jim.Serializer{out=strings.to_writer(&sb)}
+
+    jim.object(&se, foo)
+    json := strings.to_string(sb)
+
+    testing.expect_value(t, json, `{"fruit":"Banana","qty":23}`)
 }
 
 @(test)
@@ -474,5 +498,34 @@ deserialize_array_pp :: proc(t: ^testing.T) {
 
     ok = jim.array_end(&de)
     testing.expect(t, ok, "Failed to find ending of array")
+}
+
+@(test)
+deserialize_enum :: proc(t: ^testing.T) {
+    json := `{"fruit":"Banana","qty":23}`
+    de := jim.Deserializer{input = strings.to_reader(&strings.Reader{}, json)}
+
+    ok := jim.object_begin(&de)
+    testing.expect(t, ok, "Failed to find beginning of object")
+
+    fruit_key, fruit_key_ok := jim.key(&de)
+    testing.expect(t, fruit_key_ok, "Failed to find Fruit value")
+    testing.expect_value(t, fruit_key, "fruit")
+    delete(fruit_key)
+
+    Fruit :: enum {Apple, Banana, Cherry}
+
+    fruit_value, fruit_value_ok := jim.str(&de, Fruit)
+    testing.expect(t, fruit_value_ok, "Failed to parse Fruit value")
+    testing.expect_value(t, fruit_value, Fruit.Banana)
+
+    qty_key, qty_key_ok := jim.key(&de)
+    testing.expect(t, fruit_key_ok, "Failed to find qty value")
+    testing.expect_value(t, qty_key, "qty")
+    delete(qty_key)
+
+    qty_value, qty_value_ok := jim.number(&de)
+    testing.expect(t, qty_value_ok, "Failed to parse Fruit value")
+    testing.expect_value(t, qty_value, 23)
 }
 
