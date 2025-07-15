@@ -405,6 +405,24 @@ deserialize_object_pp :: proc(t: ^testing.T) {
 }
 
 @(test)
+deserialize_object_auto_primitive :: proc(t: ^testing.T) {
+    Foo :: struct {
+        b: bool,
+        n: f64,
+        s: string,
+    }
+
+    json := `{"b":true,"n":7,"s":"hi"}`
+    de := jim.Deserializer{input = strings.to_reader(&strings.Reader{}, json)}
+
+    foo, ok := jim.object(&de, Foo)
+    defer delete(foo.s)
+
+    testing.expect(t, ok, "Failed to deserialize object")
+    testing.expect_value(t, foo, Foo{b=true, n=7, s="hi"})
+}
+
+@(test)
 deserialize_array :: proc(t: ^testing.T) {
     json := `[true, false, 7, 1.5, "abc"]`
     de := jim.Deserializer{input = strings.to_reader(&strings.Reader{}, json)}
