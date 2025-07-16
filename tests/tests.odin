@@ -406,20 +406,64 @@ deserialize_object_pp :: proc(t: ^testing.T) {
 
 @(test)
 deserialize_object_auto_primitive :: proc(t: ^testing.T) {
+    Fruit :: enum {
+        Apple,
+        Banana,
+        Cherry,
+    }
+
     Foo :: struct {
         b: bool,
         n: f64,
         s: string,
+        f: Fruit,
     }
 
-    json := `{"b":true,"n":7,"s":"hi"}`
+    json := `{"b":true,"n":7,"s":"hi","f":"Banana"}`
     de := jim.Deserializer{input = strings.to_reader(&strings.Reader{}, json)}
 
     foo, ok := jim.object(&de, Foo)
     defer delete(foo.s)
 
     testing.expect(t, ok, "Failed to deserialize object")
-    testing.expect_value(t, foo, Foo{b=true, n=7, s="hi"})
+    testing.expect_value(t, foo, Foo{b=true, n=7, s="hi", f=.Banana})
+}
+
+@(test)
+deserialize_object_auto_nested :: proc(t: ^testing.T) {
+    Fruit :: enum {
+        Apple,
+        Banana,
+        Cherry,
+    }
+
+    Drink :: enum {
+        Water,
+        Rum,
+        Vodka,
+    }
+
+    Bar :: struct {
+        d: Drink,
+        q: f64,
+    }
+
+    Foo :: struct {
+        b: bool,
+        n: f64,
+        s: string,
+        f: Fruit,
+        bar: Bar,
+    }
+
+    json := `{"b":true,"n":7,"s":"hi","f":"Banana","bar":{"d":"Vodka","q":69}}`
+    de := jim.Deserializer{input = strings.to_reader(&strings.Reader{}, json)}
+
+    foo, ok := jim.object(&de, Foo)
+    defer delete(foo.s)
+
+    testing.expect(t, ok, "Failed to deserialize object")
+    testing.expect_value(t, foo, Foo{b=true, n=7, s="hi", f=.Banana, bar={d=.Vodka, q=69}})
 }
 
 @(test)

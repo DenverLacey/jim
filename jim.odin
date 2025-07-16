@@ -4,6 +4,7 @@ import "base:intrinsics"
 import "base:runtime"
 import "core:fmt"
 import "core:io"
+import "core:mem"
 import "core:os"
 import "core:reflect"
 import "core:slice"
@@ -231,7 +232,7 @@ type_is_serializable_object :: proc(T: ^runtime.Type_Info) -> bool {
             }
         case runtime.Type_Info_Enum:
         case:
-            fmt.eprintfln("Error: Cannot serialize an object with a field of type `%t`", field_type.id)
+            fmt.eprintfln("Error: Cannot serialize an object with a field of type `%v`", ti.types[i])
             return false
         }
     }
@@ -358,7 +359,7 @@ deserialize_object_info :: proc(d: ^Deserializer, type: typeid, info: runtime.Ty
 
         field := reflect.struct_field_by_name(type, k)
         if field == {} {
-            fmt.eprintfln("Error: %t does not have a member called %v", type, k)
+            fmt.eprintfln("Error: %v does not have a member called %v", type, k)
             return false
         }
 
@@ -374,7 +375,7 @@ deserialize_object_info :: proc(d: ^Deserializer, type: typeid, info: runtime.Ty
             unimplemented()
         case runtime.Type_Info_Float:
             field_value := number(d) or_return
-            field_ptr := cast(^f64)(base + field.offset)
+            field_ptr := cast(^f64)(base + field.offset) // TODO: Check size
             field_ptr^ = field_value
         case runtime.Type_Info_String:
             field_value := str(d) or_return
@@ -390,9 +391,20 @@ deserialize_object_info :: proc(d: ^Deserializer, type: typeid, info: runtime.Ty
             field_ptr := base + field.offset
             deserialize_object_info(d, bfti.id, fti, field_ptr, allow_partial_init) or_return
         case runtime.Type_Info_Enum:
-            unimplemented()
+            field_value := str(d) or_return
+            defer delete(field_value)
+
+            idx, found := slice.linear_search(fti.names, field_value)
+            if !found {
+                fmt.eprintfln("Error: '%v' is not a valid value for '%v' which is an %v", field_value, k, bfti.id)
+                return false
+            }
+
+            enum_value := fti.values[idx]
+            field_ptr := cast(^runtime.Type_Info_Enum_Value)(base + field.offset)
+            field_ptr^ = enum_value
         case:
-            fmt.eprintfln("Error: Cannot serialize an object with a field of type `%t`", bfti.id)
+            fmt.eprintfln("Error: Cannot serialize an object with a field of type `%v`", field.type)
             return false
         }
     }
