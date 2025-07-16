@@ -20,7 +20,10 @@ key          :: proc{serialize_key, deserialize_key}
 boolean      :: proc{serialize_boolean, deserialize_boolean}
 number       :: proc{serialize_number, deserialize_number}
 str          :: proc{serialize_str, serialize_enum_str, deserialize_str, deserialize_enum_str}
-object       :: proc{serialize_object, deserialize_object}
+
+when !ODIN_NO_RTTI {
+    object :: proc{serialize_object, deserialize_object}
+}
 
 Serializer :: struct {
     out: io.Writer,
@@ -104,65 +107,67 @@ serialize_enum_str :: proc(s: ^Serializer, value: $E)
     str(s, name)
 }
 
-serialize_object :: proc(s: ^Serializer, value: $T, caller := #caller_location) {
-    if !type_is_serializable_object(type_info_of(T)) {
-        panic("Tried to serialize an object that cannot be serialized.", caller)
-    }
-    ti := type_info_of(T)
-    ts := reflect.type_info_base(ti).variant.(runtime.Type_Info_Struct)
-    serialize_object_info(s, ts, value)
-}
-
-@(private)
-serialize_object_info :: proc(s: ^Serializer, info: runtime.Type_Info_Struct, value: any) {
-    object_begin(s)
-    for i in 0..<info.field_count {
-        field := reflect.Struct_Field {
-            name = info.names[i],
-            type = info.types[i],
-            tag = reflect.Struct_Tag(info.tags[i]),
-            offset = info.offsets[i],
-            is_using = info.usings[i],
+when !ODIN_NO_RTTI {
+    serialize_object :: proc(s: ^Serializer, value: $T, caller := #caller_location) {
+        if !type_is_serializable_object(type_info_of(T)) {
+            panic("Tried to serialize an object that cannot be serialized.", caller)
         }
-
-        key(s, field.name)
-        bti := reflect.type_info_base(info.types[i])
-        #partial switch fti in bti.variant {
-        case runtime.Type_Info_Boolean:
-            field_value := reflect.struct_field_value(value, field).(bool)
-            boolean(s, field_value)
-        case runtime.Type_Info_Rune:
-            field_value := reflect.struct_field_value(value, field).(rune)
-            buf: [4]byte
-            sb := strings.builder_from_bytes(buf[:])
-            strings.write_rune(&sb, field_value)
-            str(s, strings.to_string(sb))
-        case runtime.Type_Info_Integer:
-            unimplemented()
-        case runtime.Type_Info_Float:
-            field_value := reflect.struct_field_value(value, field).(f64)
-            number(s, field_value)
-        case runtime.Type_Info_String:
-            field_value := reflect.struct_field_value(value, field).(string)
-            str(s, field_value)
-        case runtime.Type_Info_Array:
-            unimplemented()
-        case runtime.Type_Info_Dynamic_Array:
-            unimplemented()
-        case runtime.Type_Info_Slice:
-            unimplemented()
-        case runtime.Type_Info_Struct:
-            serialize_object_info(s, fti, reflect.struct_field_value(value, field))
-        case runtime.Type_Info_Enum:
-            field_value := reflect.struct_field_value(value, field)
-            name, ok := reflect.enum_name_from_value_any(field_value)
-            assert(ok)
-            str(s, name)
-        case:
-            unreachable()
-        }
+        ti := type_info_of(T)
+        ts := reflect.type_info_base(ti).variant.(runtime.Type_Info_Struct)
+        serialize_object_info(s, ts, value)
     }
-    object_end(s)
+
+    @(private)
+    serialize_object_info :: proc(s: ^Serializer, info: runtime.Type_Info_Struct, value: any) {
+        object_begin(s)
+        for i in 0..<info.field_count {
+            field := reflect.Struct_Field {
+                name = info.names[i],
+                type = info.types[i],
+                tag = reflect.Struct_Tag(info.tags[i]),
+                offset = info.offsets[i],
+                is_using = info.usings[i],
+            }
+
+            key(s, field.name)
+            bti := reflect.type_info_base(info.types[i])
+            #partial switch fti in bti.variant {
+            case runtime.Type_Info_Boolean:
+                field_value := reflect.struct_field_value(value, field).(bool)
+                boolean(s, field_value)
+            case runtime.Type_Info_Rune:
+                field_value := reflect.struct_field_value(value, field).(rune)
+                buf: [4]byte
+                sb := strings.builder_from_bytes(buf[:])
+                strings.write_rune(&sb, field_value)
+                str(s, strings.to_string(sb))
+            case runtime.Type_Info_Integer:
+                unimplemented()
+            case runtime.Type_Info_Float:
+                field_value := reflect.struct_field_value(value, field).(f64)
+                number(s, field_value)
+            case runtime.Type_Info_String:
+                field_value := reflect.struct_field_value(value, field).(string)
+                str(s, field_value)
+            case runtime.Type_Info_Array:
+                unimplemented()
+            case runtime.Type_Info_Dynamic_Array:
+                unimplemented()
+            case runtime.Type_Info_Slice:
+                unimplemented()
+            case runtime.Type_Info_Struct:
+                serialize_object_info(s, fti, reflect.struct_field_value(value, field))
+            case runtime.Type_Info_Enum:
+                field_value := reflect.struct_field_value(value, field)
+                name, ok := reflect.enum_name_from_value_any(field_value)
+                assert(ok)
+                str(s, name)
+            case:
+                unreachable()
+            }
+        }
+        object_end(s)
+    }
 }
 
 @(private)
@@ -326,96 +331,98 @@ deserialize_enum_str :: proc(d: ^Deserializer, $E: typeid) -> (value: E, ok: boo
     return reflect.enum_from_name(E, name)
 }
 
-deserialize_object :: proc(d: ^Deserializer, $T: typeid, allow_partial_init := false, caller := #caller_location) -> (value: T, ok: bool) {
-    if !type_is_serializable_object(type_info_of(T)) {
-        panic("Tried to deserialize an object that cannot be deserialized.", caller)
-    }
-    ti := type_info_of(T)
-    ts := reflect.type_info_base(ti).variant.(runtime.Type_Info_Struct)
-    ok = deserialize_object_info(d, ti.id, ts, auto_cast &value, allow_partial_init)
-    return
-}
-
-@(private)
-deserialize_object_info :: proc(d: ^Deserializer, type: typeid, info: runtime.Type_Info_Struct, base: uintptr, allow_partial_init: bool) -> (ok: bool) {
-    set_fields: [dynamic]string
-    defer {
-        for field in set_fields {
-            delete(field)
+when !ODIN_NO_RTTI {
+    deserialize_object :: proc(d: ^Deserializer, $T: typeid, allow_partial_init := false, caller := #caller_location) -> (value: T, ok: bool) {
+        if !type_is_serializable_object(type_info_of(T)) {
+            panic("Tried to deserialize an object that cannot be deserialized.", caller)
         }
-        delete(set_fields)
+        ti := type_info_of(T)
+        ts := reflect.type_info_base(ti).variant.(runtime.Type_Info_Struct)
+        ok = deserialize_object_info(d, ti.id, ts, auto_cast &value, allow_partial_init)
+        return
     }
 
-    object_begin(d) or_return
-    for !is_object_end(d) {
-        k := key(d) or_return
-        if _, found := slice.linear_search(set_fields[:], k); found {
-            fmt.eprintfln("Error: Duplicate key found: %v", k)
-            delete(k)
-            return false
+    @(private)
+    deserialize_object_info :: proc(d: ^Deserializer, type: typeid, info: runtime.Type_Info_Struct, base: uintptr, allow_partial_init: bool) -> (ok: bool) {
+        set_fields: [dynamic]string
+        defer {
+            for field in set_fields {
+                delete(field)
+            }
+            delete(set_fields)
         }
 
-        append(&set_fields, k)
-
-        field := reflect.struct_field_by_name(type, k)
-        if field == {} {
-            fmt.eprintfln("Error: %v does not have a member called %v", type, k)
-            return false
-        }
-
-        bfti := reflect.type_info_base(field.type)
-        #partial switch fti in bfti.variant {
-        case runtime.Type_Info_Boolean:
-            field_value := boolean(d) or_return
-            field_ptr := cast(^bool)(base + field.offset)
-            field_ptr^ = field_value
-        case runtime.Type_Info_Rune:
-            unimplemented()
-        case runtime.Type_Info_Integer:
-            unimplemented()
-        case runtime.Type_Info_Float:
-            field_value := number(d) or_return
-            field_ptr := cast(^f64)(base + field.offset) // TODO: Check size
-            field_ptr^ = field_value
-        case runtime.Type_Info_String:
-            field_value := str(d) or_return
-            field_ptr := cast(^string)(base + field.offset)
-            field_ptr^ = field_value
-        case runtime.Type_Info_Array:
-            unimplemented()
-        case runtime.Type_Info_Dynamic_Array:
-            unimplemented()
-        case runtime.Type_Info_Slice:
-            unimplemented()
-        case runtime.Type_Info_Struct:
-            field_ptr := base + field.offset
-            deserialize_object_info(d, bfti.id, fti, field_ptr, allow_partial_init) or_return
-        case runtime.Type_Info_Enum:
-            field_value := str(d) or_return
-            defer delete(field_value)
-
-            idx, found := slice.linear_search(fti.names, field_value)
-            if !found {
-                fmt.eprintfln("Error: '%v' is not a valid value for '%v' which is an %v", field_value, k, bfti.id)
+        object_begin(d) or_return
+        for !is_object_end(d) {
+            k := key(d) or_return
+            if _, found := slice.linear_search(set_fields[:], k); found {
+                fmt.eprintfln("Error: Duplicate key found: %v", k)
+                delete(k)
                 return false
             }
 
-            enum_value := fti.values[idx]
-            field_ptr := cast(^runtime.Type_Info_Enum_Value)(base + field.offset)
-            field_ptr^ = enum_value
-        case:
-            fmt.eprintfln("Error: Cannot serialize an object with a field of type `%v`", field.type)
+            append(&set_fields, k)
+
+            field := reflect.struct_field_by_name(type, k)
+            if field == {} {
+                fmt.eprintfln("Error: %v does not have a member called %v", type, k)
+                return false
+            }
+
+            bfti := reflect.type_info_base(field.type)
+            #partial switch fti in bfti.variant {
+            case runtime.Type_Info_Boolean:
+                field_value := boolean(d) or_return
+                field_ptr := cast(^bool)(base + field.offset)
+                field_ptr^ = field_value
+            case runtime.Type_Info_Rune:
+                unimplemented()
+            case runtime.Type_Info_Integer:
+                unimplemented()
+            case runtime.Type_Info_Float:
+                field_value := number(d) or_return
+                field_ptr := cast(^f64)(base + field.offset) // TODO: Check size
+                field_ptr^ = field_value
+            case runtime.Type_Info_String:
+                field_value := str(d) or_return
+                field_ptr := cast(^string)(base + field.offset)
+                field_ptr^ = field_value
+            case runtime.Type_Info_Array:
+                unimplemented()
+            case runtime.Type_Info_Dynamic_Array:
+                unimplemented()
+            case runtime.Type_Info_Slice:
+                unimplemented()
+            case runtime.Type_Info_Struct:
+                field_ptr := base + field.offset
+                deserialize_object_info(d, bfti.id, fti, field_ptr, allow_partial_init) or_return
+            case runtime.Type_Info_Enum:
+                field_value := str(d) or_return
+                defer delete(field_value)
+
+                idx, found := slice.linear_search(fti.names, field_value)
+                if !found {
+                    fmt.eprintfln("Error: '%v' is not a valid value for '%v' which is an %v", field_value, k, bfti.id)
+                    return false
+                }
+
+                enum_value := fti.values[idx]
+                field_ptr := cast(^runtime.Type_Info_Enum_Value)(base + field.offset)
+                field_ptr^ = enum_value
+            case:
+                fmt.eprintfln("Error: Cannot serialize an object with a field of type `%v`", field.type)
+                return false
+            }
+        }
+        object_end(d) or_return
+
+        if !allow_partial_init && len(set_fields) != int(info.field_count) {
+            fmt.eprintfln("Error: Not all fields given a value.") // TODO: Improve error message
             return false
         }
-    }
-    object_end(d) or_return
 
-    if !allow_partial_init && len(set_fields) != int(info.field_count) {
-        fmt.eprintfln("Error: Not all fields given a value.") // TODO: Improve error message
-        return false
+        return true
     }
-
-    return true
 }
 
 TokenKind :: enum {
