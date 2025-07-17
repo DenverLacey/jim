@@ -109,64 +109,67 @@ serialize_enum_str :: proc(s: ^Serializer, value: $E)
 
 when !ODIN_NO_RTTI {
     serialize_object :: proc(s: ^Serializer, value: $T, caller := #caller_location) {
-        if !type_is_serializable_object(type_info_of(T)) {
+        ti := reflect.type_info_base(type_info_of(T))
+        if !type_is_serializable(ti) || !reflect.is_struct(ti) {
             panic("Tried to serialize an object that cannot be serialized.", caller)
         }
-        ti := type_info_of(T)
-        ts := reflect.type_info_base(ti).variant.(runtime.Type_Info_Struct)
-        serialize_object_info(s, ts, value)
+        serialize_any(s, value)
     }
 
     @(private)
-    serialize_object_info :: proc(s: ^Serializer, info: runtime.Type_Info_Struct, value: any) {
-        object_begin(s)
-        for i in 0..<info.field_count {
-            field := reflect.Struct_Field {
-                name = info.names[i],
-                type = info.types[i],
-                tag = reflect.Struct_Tag(info.tags[i]),
-                offset = info.offsets[i],
-                is_using = info.usings[i],
+    serialize_any :: proc(s: ^Serializer, value: any) {
+        bti := reflect.type_info_base(type_info_of(value.id))
+        #partial switch ti in bti.variant {
+        case runtime.Type_Info_Boolean:
+            field_value := value.(bool)
+            boolean(s, field_value)
+        case runtime.Type_Info_Rune:
+            field_value := value.(rune)
+            buf: [4]byte
+            sb := strings.builder_from_bytes(buf[:])
+            strings.write_rune(&sb, field_value)
+            str(s, strings.to_string(sb))
+        case runtime.Type_Info_Integer:
+            unimplemented()
+        case runtime.Type_Info_Float:
+            field_value := value.(f64)
+            number(s, field_value)
+        case runtime.Type_Info_String:
+            field_value := value.(string)
+            str(s, field_value)
+        case runtime.Type_Info_Array, runtime.Type_Info_Dynamic_Array, runtime.Type_Info_Slice:
+            serialize_array_like(s, value)
+        case runtime.Type_Info_Struct:
+            object_begin(s)
+            for i in 0..<ti.field_count {
+                field := reflect.Struct_Field {
+                    name = ti.names[i],
+                    type = ti.types[i],
+                    tag = reflect.Struct_Tag(ti.tags[i]),
+                    offset = ti.offsets[i],
+                    is_using = ti.usings[i],
+                }
+                key(s, field.name)
+                serialize_any(s, reflect.struct_field_value(value, field))
             }
-
-            key(s, field.name)
-            bti := reflect.type_info_base(info.types[i])
-            #partial switch fti in bti.variant {
-            case runtime.Type_Info_Boolean:
-                field_value := reflect.struct_field_value(value, field).(bool)
-                boolean(s, field_value)
-            case runtime.Type_Info_Rune:
-                field_value := reflect.struct_field_value(value, field).(rune)
-                buf: [4]byte
-                sb := strings.builder_from_bytes(buf[:])
-                strings.write_rune(&sb, field_value)
-                str(s, strings.to_string(sb))
-            case runtime.Type_Info_Integer:
-                unimplemented()
-            case runtime.Type_Info_Float:
-                field_value := reflect.struct_field_value(value, field).(f64)
-                number(s, field_value)
-            case runtime.Type_Info_String:
-                field_value := reflect.struct_field_value(value, field).(string)
-                str(s, field_value)
-            case runtime.Type_Info_Array:
-                unimplemented()
-            case runtime.Type_Info_Dynamic_Array:
-                unimplemented()
-            case runtime.Type_Info_Slice:
-                unimplemented()
-            case runtime.Type_Info_Struct:
-                serialize_object_info(s, fti, reflect.struct_field_value(value, field))
-            case runtime.Type_Info_Enum:
-                field_value := reflect.struct_field_value(value, field)
-                name, ok := reflect.enum_name_from_value_any(field_value)
-                assert(ok)
-                str(s, name)
-            case:
-                unreachable()
-            }
+            object_end(s)
+        case runtime.Type_Info_Enum:
+            name, ok := reflect.enum_name_from_value_any(value)
+            assert(ok)
+            str(s, name)
+        case:
+            unreachable()
         }
-        object_end(s)
+    }
+
+    @(private)
+    serialize_array_like :: proc(s: ^Serializer, array: any) {
+        array_begin(s)
+        it := 0
+        for elem in reflect.iterate_array(array, &it) {
+            serialize_any(s, elem)
+        }
+        array_end(s)
     }
 }
 
@@ -210,38 +213,33 @@ format_for_array_if_needed :: proc(s: ^Serializer) {
 }
 
 @(private)
-type_is_serializable_object :: proc(T: ^runtime.Type_Info) -> bool {
-    if !reflect.is_struct(reflect.type_info_base(T)) {
-        return false
-    }
-
-    ti := reflect.type_info_base(T).variant.(runtime.Type_Info_Struct)
-    for i in 0..<ti.field_count {
-        field_type := reflect.type_info_base(ti.types[i])
-        #partial switch field_info in field_type.variant {
-        case runtime.Type_Info_Boolean:
-        case runtime.Type_Info_Rune:
-        case runtime.Type_Info_Integer:
-        case runtime.Type_Info_Float:
-        case runtime.Type_Info_String:
-        case runtime.Type_Info_Array:
-            unimplemented()
-        case runtime.Type_Info_Dynamic_Array:
-            unimplemented()
-        case runtime.Type_Info_Slice:
-            unimplemented()
-        case runtime.Type_Info_Struct:
-            ok := type_is_serializable_object(field_type)
+type_is_serializable :: proc(T: ^runtime.Type_Info) -> bool {
+    bti := reflect.type_info_base(T)
+    #partial switch ti in bti.variant {
+    case runtime.Type_Info_Boolean:
+    case runtime.Type_Info_Rune:
+    case runtime.Type_Info_Integer:
+    case runtime.Type_Info_Float:
+    case runtime.Type_Info_String:
+    case runtime.Type_Info_Array:
+        return type_is_serializable(ti.elem)
+    case runtime.Type_Info_Dynamic_Array:
+        return type_is_serializable(ti.elem)
+    case runtime.Type_Info_Slice:
+        return type_is_serializable(ti.elem)
+    case runtime.Type_Info_Struct:
+        for i in 0..<ti.field_count {
+            field_type := reflect.type_info_base(ti.types[i])
+            ok := type_is_serializable(field_type)
             if !ok {
                 return false
             }
-        case runtime.Type_Info_Enum:
-        case:
-            fmt.eprintfln("Error: Cannot serialize an object with a field of type `%v`", ti.types[i])
-            return false
         }
+    case runtime.Type_Info_Enum:
+    case:
+        fmt.eprintfln("Error: Cannot serialize a value with of type `%v`", T)
+        return false
     }
-
     return true
 }
 
@@ -333,11 +331,11 @@ deserialize_enum_str :: proc(d: ^Deserializer, $E: typeid) -> (value: E, ok: boo
 
 when !ODIN_NO_RTTI {
     deserialize_object :: proc(d: ^Deserializer, $T: typeid, allow_partial_init := false, caller := #caller_location) -> (value: T, ok: bool) {
-        if !type_is_serializable_object(type_info_of(T)) {
+        ti := reflect.type_info_base(type_info_of(T))
+        if !type_is_serializable(ti) || !reflect.is_struct(ti) {
             panic("Tried to deserialize an object that cannot be deserialized.", caller)
         }
-        ti := type_info_of(T)
-        ts := reflect.type_info_base(ti).variant.(runtime.Type_Info_Struct)
+        ts := ti.variant.(runtime.Type_Info_Struct)
         ok = deserialize_object_info(d, ti.id, ts, auto_cast &value, allow_partial_init)
         return
     }

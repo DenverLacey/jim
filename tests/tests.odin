@@ -1,3 +1,4 @@
+#+feature dynamic-literals
 package jim_tests
 
 import "core:testing"
@@ -274,6 +275,28 @@ serialize_object_auto_enum :: proc(t: ^testing.T) {
     json := strings.to_string(sb)
 
     testing.expect_value(t, json, `{"fruit":"Banana","qty":23}`)
+}
+
+@(test)
+serialize_object_auto_array :: proc(t: ^testing.T) {
+    Foo :: struct {
+        fixed: [3]rune,
+        slice: []f64,
+        dyn: [dynamic]bool,
+    }
+
+    foo := Foo{{'A', 'B', 'C'}, {1, 2, 3}, {true, false, true}}
+    defer delete(foo.dyn)
+
+    sb := strings.Builder{}
+    defer strings.builder_destroy(&sb)
+
+    se := jim.Serializer{out=strings.to_writer(&sb)}
+
+    jim.object(&se, foo)
+    json := strings.to_string(sb)
+
+    testing.expect_value(t, json, `{"fixed":["A","B","C"],"slice":[1,2,3],"dyn":[true,false,true]}`)
 }
 
 @(test)
