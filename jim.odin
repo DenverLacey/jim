@@ -138,17 +138,16 @@ when !ODIN_NO_RTTI {
             field_value := value.(string)
             str(s, field_value)
         case runtime.Type_Info_Array, runtime.Type_Info_Dynamic_Array, runtime.Type_Info_Slice:
-            serialize_array_like(s, value)
+            array_begin(s)
+            it := 0
+            for elem in reflect.iterate_array(value, &it) {
+                serialize_any(s, elem)
+            }
+            array_end(s)
         case runtime.Type_Info_Struct:
             object_begin(s)
             for i in 0..<ti.field_count {
-                field := reflect.Struct_Field {
-                    name = ti.names[i],
-                    type = ti.types[i],
-                    tag = reflect.Struct_Tag(ti.tags[i]),
-                    offset = ti.offsets[i],
-                    is_using = ti.usings[i],
-                }
+                field := reflect.struct_field_at(bti.id, int(i))
                 key(s, field.name)
                 serialize_any(s, reflect.struct_field_value(value, field))
             }
@@ -160,16 +159,6 @@ when !ODIN_NO_RTTI {
         case:
             unreachable()
         }
-    }
-
-    @(private)
-    serialize_array_like :: proc(s: ^Serializer, array: any) {
-        array_begin(s)
-        it := 0
-        for elem in reflect.iterate_array(array, &it) {
-            serialize_any(s, elem)
-        }
-        array_end(s)
     }
 }
 

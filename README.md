@@ -34,9 +34,9 @@ print_json :: proc() {
     se := jim.Serializer{pp = 2}
 
     jim.object_begin(&se)
-        jim.object_member(&se, "msg")
+        jim.key(&se, "msg")
         jim.str(&se, "Hello world!")
-        jim.object_member(&se, "sender")
+        jim.key(&se, "sender")
         jim.str(&se, "Alex Smith")
     jim.object_end(&se)
 }
@@ -65,13 +65,13 @@ parse_json :: proc(json: string) -> (ok: bool) {
     de := jim.Deserializer{input = strings.to_reader(&strings.Reader{}, json)}
     
     jim.object_begin(&de) or_return
-        msg_member := jim.object_member(&de) or_return
-        assert(msg_member == "msg")
+        msg_key := jim.key(&de) or_return
+        assert(msg_key == "msg")
 
         msg_value := jim.str(&de) or_return
 
-        sender_member := jim.object_member(&de) or_return
-        assert(sender_member == "sender")
+        sender_key := jim.key(&de) or_return
+        assert(sender_key == "sender")
 
         sender_value := jim.str(&de) or_return
     jim.object_end(&de) or_return
@@ -83,4 +83,55 @@ parse_json :: proc(json: string) -> (ok: bool) {
 The cool thing is that parsing happens gradually and doesn't need to build a tree of a bunch of heap allocated objects because everything happens immediately.
 
 NOTE: At the moment strings are cloned and thus require freeing. You can set `context.allocator` to change this behaviour.
+
+## Using RTTI
+
+When `ODIN_NO_RTTI` is set to false (default), Jim also comes with extra procedures that can (de)serialize an object or an array automatically.
+
+Serializing would look like this:
+
+```odin
+import "jim"
+
+Weapon :: enum { Sword, Dagger, Crossbow, Flail }
+Player :: struct {
+    position: [3]f64,
+    direction: [3]f64,
+    hp: f64,
+    equipped_weapon: Weapon,
+}
+
+save_player :: proc(p: Player, se: ^jim.Serializer) {
+    jim.object(se, p)
+}
+```
+
+The resulting JSON would look like this:
+
+```json
+{
+  "position": [
+    0,
+    0,
+    0
+  ],
+  "direction": [
+    0,
+    0,
+    1
+  ],
+  "hp": 100,
+  "equppied_weapon": "Sword"
+}
+```
+
+And then, to deserializing that json would look like this:
+
+```odin
+import "jim"
+
+load_player :: proc(de: ^jim.Deserializer) -> (player: Player, ok: bool) {
+    return jim.object(de, Player)
+}
+```
 
