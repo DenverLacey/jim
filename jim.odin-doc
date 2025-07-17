@@ -1,0 +1,43 @@
+package jim
+	procedures
+		deserialize_array_begin :: proc(d: ^Deserializer) -> bool {...}
+		deserialize_array_end :: proc(d: ^Deserializer) -> bool {...}
+		deserialize_boolean :: proc(d: ^Deserializer) -> (value: bool, ok: bool) {...}
+		deserialize_enum_str :: proc(d: ^Deserializer, $E: typeid) -> (value: E, ok: bool) {...}
+		deserialize_key :: proc(d: ^Deserializer) -> (key: string, ok: bool) {...}
+		deserialize_number :: proc(d: ^Deserializer) -> (value: f64, ok: bool) {...}
+		deserialize_object :: proc(d: ^Deserializer, $T: typeid, allow_partial_init := false, caller := #caller_location) -> (value: T, ok: bool) {...}
+		deserialize_object_begin :: proc(d: ^Deserializer) -> bool {...}
+		deserialize_object_end :: proc(d: ^Deserializer) -> bool {...}
+		deserialize_str :: proc(d: ^Deserializer) -> (value: string, ok: bool) {...}
+		is_array_end :: proc(d: ^Deserializer) -> bool {...}
+		is_object_end :: proc(d: ^Deserializer) -> bool {...}
+		null :: proc(s: ^Serializer) {...}
+		serialize_array_begin :: proc(s: ^Serializer) {...}
+		serialize_array_end :: proc(s: ^Serializer) {...}
+		serialize_boolean :: proc(s: ^Serializer, value: bool) {...}
+		serialize_enum_str :: proc(s: ^Serializer, value: $E) {...}
+		serialize_key :: proc(s: ^Serializer, key: string) {...}
+		serialize_number :: proc(s: ^Serializer, value: f64) {...}
+		serialize_object :: proc(s: ^Serializer, value: $T, caller := #caller_location) {...}
+		serialize_object_begin :: proc(s: ^Serializer) {...}
+		serialize_object_end :: proc(s: ^Serializer) {...}
+		serialize_str :: proc(s: ^Serializer, value: string) {...}
+
+	proc_group
+		array_begin :: proc{serialize_array_begin, deserialize_array_begin}
+		array_end :: proc{serialize_array_end, deserialize_array_end}
+		boolean :: proc{serialize_boolean, deserialize_boolean}
+		key :: proc{serialize_key, deserialize_key}
+		number :: proc{serialize_number, deserialize_number}
+		object :: proc{serialize_object, deserialize_object}
+		object_begin :: proc{serialize_object_begin, deserialize_object_begin}
+		object_end :: proc{serialize_object_end, deserialize_object_end}
+		str :: proc{serialize_str, serialize_enum_str, deserialize_str, deserialize_enum_str}
+
+	types
+		Deserializer :: struct {input: io.Reader, _peeked_char: rune, _peeked: bool}
+		Serializer :: struct {out: io.Writer, pp: u16, _cur_indent: u16, _array_depth: u16, _prev: byte}
+		Token :: struct {kind: TokenKind, len: int, text: [256]byte}
+		TokenKind :: enum {NONE, OCURLY, CCURLY, OBRACKET, CBRACKET, COMMA, COLON, NULL, TRUE, FALSE, NUMBER, STRING}
+
