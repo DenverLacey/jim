@@ -34,6 +34,7 @@ Serializer :: struct {
 }
 
 serialize_object_begin :: proc(s: ^Serializer) {
+    format_for_array_if_needed(s)
     jprintf(s, "{{")
     if s.pp != 0 {
         s._cur_indent += 1
@@ -50,6 +51,7 @@ serialize_object_end :: proc(s: ^Serializer) {
 }
 
 serialize_array_begin :: proc(s: ^Serializer) {
+    format_for_array_if_needed(s)
     jprintf(s, "[")
     if s.pp != 0 {
         s._cur_indent += 1
@@ -102,6 +104,7 @@ serialize_str :: proc(s: ^Serializer, value: string) {
 serialize_enum_str :: proc(s: ^Serializer, value: $E)
     where intrinsics.type_is_enum(E)
 {
+    format_for_array_if_needed(s)
     e_info := reflect.type_info_base(type_info_of(E)).variant.(Type_Info_Enum)
     name := reflect.enum_name_from_value(value)
     str(s, name)
@@ -109,6 +112,7 @@ serialize_enum_str :: proc(s: ^Serializer, value: $E)
 
 when !ODIN_NO_RTTI {
     serialize_object :: proc(s: ^Serializer, value: $T, caller := #caller_location) {
+        format_for_array_if_needed(s)
         ti := reflect.type_info_base(type_info_of(T))
         if !type_is_serializable(ti) || !reflect.is_struct(ti) {
             panic("Tried to serialize an object that cannot be serialized.", caller)
@@ -183,7 +187,16 @@ jprintf :: proc(s: ^Serializer, format: string, args: ..any) {
 
 @(private)
 needs_comma :: proc(prev: byte) -> bool {
-    return prev != '{' && prev != '[' && prev != '\n' && prev != 0
+    return prev != '{' && prev != '[' && prev != ',' && prev != '\n' && prev != ' ' && prev != ':' && prev != 0
+}
+
+@(private)
+needs_newline :: proc(s: ^Serializer) -> bool {
+    if s.pp == 0 {
+        return false
+    }
+    p := s._prev
+    return (p == '{' || p == '[' || p == ',') && (p != '\n' && p != ' ' && p != ':' && p != 0)
 }
 
 @(private)
@@ -196,7 +209,7 @@ format_for_array_if_needed :: proc(s: ^Serializer) {
         jprintf(s, ",")
     }
 
-    if s.pp != 0 {
+    if needs_newline(s) {
         jprintf(s, "\n%*v", s._cur_indent * s.pp, "")
     }
 }

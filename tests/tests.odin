@@ -181,6 +181,14 @@ serialize_nested_pp :: proc(t: ^testing.T) {
             jim.number(&se, 1)
             jim.number(&se, 2)
             jim.number(&se, 3)
+            jim.object_begin(&se)
+                jim.key(&se, "A")
+                jim.number(&se, 65)
+                jim.key(&se, "B")
+                jim.number(&se, 66)
+                jim.key(&se, "C")
+                jim.number(&se, 67)
+            jim.object_end(&se)
         jim.array_end(&se)
         jim.key(&se, "obj")
         jim.object_begin(&se)
@@ -196,7 +204,12 @@ serialize_nested_pp :: proc(t: ^testing.T) {
     "array": [
         1,
         2,
-        3
+        3,
+        {
+            "A": 65,
+            "B": 66,
+            "C": 67
+        }
     ],
     "obj": {
         "name": "John Smith",
@@ -231,14 +244,14 @@ serialize_object_auto_primitive :: proc(t: ^testing.T) {
 serialize_object_auto_nested :: proc(t: ^testing.T) {
     Foo :: struct {
         name: string,
-        obj: Bar,
+        objs: []Bar,
     }
 
     Bar :: struct {
         name: string,
     }
 
-    foo := Foo{"foo", {"bar"}}
+    foo := Foo{"foo", {{"bar"}, {"baz"}, {"buz"}}}
 
     sb := strings.Builder{}
     defer strings.builder_destroy(&sb)
@@ -248,7 +261,7 @@ serialize_object_auto_nested :: proc(t: ^testing.T) {
     jim.object(&se, foo)
     json := strings.to_string(sb)
 
-    testing.expect_value(t, json, `{"name":"foo","obj":{"name":"bar"}}`)
+    testing.expect_value(t, json, `{"name":"foo","objs":[{"name":"bar"},{"name":"baz"},{"name":"buz"}]}`)
 }
 
 @(test)
@@ -279,13 +292,14 @@ serialize_object_auto_enum :: proc(t: ^testing.T) {
 
 @(test)
 serialize_object_auto_array :: proc(t: ^testing.T) {
+    Fruit :: enum { Apple, Banana, Cherry }
     Foo :: struct {
         fixed: [3]rune,
         slice: []f64,
-        dyn: [dynamic]bool,
+        dyn: [dynamic]Fruit,
     }
 
-    foo := Foo{{'A', 'B', 'C'}, {1, 2, 3}, {true, false, true}}
+    foo := Foo{{'A', 'B', 'C'}, {1, 2, 3}, {.Apple, .Banana, .Cherry}}
     defer delete(foo.dyn)
 
     sb := strings.Builder{}
@@ -296,7 +310,7 @@ serialize_object_auto_array :: proc(t: ^testing.T) {
     jim.object(&se, foo)
     json := strings.to_string(sb)
 
-    testing.expect_value(t, json, `{"fixed":["A","B","C"],"slice":[1,2,3],"dyn":[true,false,true]}`)
+    testing.expect_value(t, json, `{"fixed":["A","B","C"],"slice":[1,2,3],"dyn":["Apple","Banana","Cherry"]}`)
 }
 
 @(test)

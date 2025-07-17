@@ -121,11 +121,11 @@ The resulting JSON would look like this:
     1
   ],
   "hp": 100,
-  "equppied_weapon": "Sword"
+  "equipped_weapon": "Sword"
 }
 ```
 
-And then, to deserializing that json would look like this:
+And then, to deserialize that json would look like this:
 
 ```odin
 import "jim"
