@@ -451,19 +451,20 @@ deserialize_object_auto_primitive :: proc(t: ^testing.T) {
 
     Foo :: struct {
         b: bool,
+        r: rune,
         n: f64,
         s: string,
         f: Fruit,
     }
 
-    json := `{"b":true,"n":7,"s":"hi","f":"Banana"}`
+    json := `{"b":true,"r":"K","n":7,"s":"hi","f":"Banana"}`
     de := jim.Deserializer{input = strings.to_reader(&strings.Reader{}, json)}
 
     foo, ok := jim.object(&de, Foo)
     defer delete(foo.s)
 
     testing.expect(t, ok, "Failed to deserialize object")
-    testing.expect_value(t, foo, Foo{b=true, n=7, s="hi", f=.Banana})
+    testing.expect_value(t, foo, Foo{b=true, r='K', n=7, s="hi", f=.Banana})
 }
 
 @(test)
@@ -487,20 +488,21 @@ deserialize_object_auto_nested :: proc(t: ^testing.T) {
 
     Foo :: struct {
         b: bool,
+        r: rune,
         n: f64,
         s: string,
         f: Fruit,
         bar: Bar,
     }
 
-    json := `{"b":true,"n":7,"s":"hi","f":"Banana","bar":{"d":"Vodka","q":69}}`
+    json := `{"b":true,"r":"K","n":7,"s":"hi","f":"Banana","bar":{"d":"Vodka","q":69}}`
     de := jim.Deserializer{input = strings.to_reader(&strings.Reader{}, json)}
 
     foo, ok := jim.object(&de, Foo)
     defer delete(foo.s)
 
     testing.expect(t, ok, "Failed to deserialize object")
-    testing.expect_value(t, foo, Foo{b=true, n=7, s="hi", f=.Banana, bar={d=.Vodka, q=69}})
+    testing.expect_value(t, foo, Foo{b=true, r='K', n=7, s="hi", f=.Banana, bar={d=.Vodka, q=69}})
 }
 
 @(test)

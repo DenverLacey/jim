@@ -11,6 +11,7 @@ import "core:slice"
 import "core:strconv"
 import "core:strings"
 import "core:unicode"
+import "core:unicode/utf8"
 
 object_begin :: proc{serialize_object_begin, deserialize_object_begin}
 object_end   :: proc{serialize_object_end, deserialize_object_end}
@@ -337,90 +338,96 @@ when !ODIN_NO_RTTI {
         if !type_is_serializable(ti) || !reflect.is_struct(ti) {
             panic("Tried to deserialize an object that cannot be deserialized.", caller)
         }
-        ts := ti.variant.(runtime.Type_Info_Struct)
-        ok = deserialize_object_info(d, ti.id, ts, auto_cast &value, allow_partial_init)
+        ok = deserialize_value(d, ti, auto_cast &value, allow_partial_init)
         return
     }
 
     @(private)
-    deserialize_object_info :: proc(d: ^Deserializer, type: typeid, info: runtime.Type_Info_Struct, base: uintptr, allow_partial_init: bool) -> (ok: bool) {
-        set_fields: [dynamic]string
-        defer {
-            for field in set_fields {
-                delete(field)
-            }
-            delete(set_fields)
-        }
-
-        object_begin(d) or_return
-        for !is_object_end(d) {
-            k := key(d) or_return
-            if _, found := slice.linear_search(set_fields[:], k); found {
-                fmt.eprintfln("Error: Duplicate key found: %v", k)
-                delete(k)
+    deserialize_value :: proc(d: ^Deserializer, info: ^runtime.Type_Info, value_ptr: uintptr, allow_partial_init: bool) -> (ok: bool) {
+        bti := reflect.type_info_base(info)
+        #partial switch ti in bti.variant {
+        case runtime.Type_Info_Boolean:
+            field_value := boolean(d) or_return
+            field_ptr := cast(^bool)value_ptr
+            field_ptr^ = field_value
+        case runtime.Type_Info_Rune:
+            field_value := str(d) or_return
+            defer delete(field_value)
+            if utf8.rune_count(field_value) != 1 {
+                fmt.eprintfln("Error: Cannot convert string %w to a rune as it has more than one character.", field_value)
                 return false
             }
-
-            append(&set_fields, k)
-
-            field := reflect.struct_field_by_name(type, k)
-            if field == {} {
-                fmt.eprintfln("Error: %v does not have a member called %v", type, k)
-                return false
+            field_ptr := cast(^rune)value_ptr
+            field_ptr^ = utf8.rune_at(field_value, 0)
+        case runtime.Type_Info_Integer:
+            unimplemented()
+        case runtime.Type_Info_Float:
+            field_value := number(d) or_return
+            field_ptr := cast(^f64)value_ptr // TODO: Check size
+            field_ptr^ = field_value
+        case runtime.Type_Info_String:
+            field_value := str(d) or_return
+            field_ptr := cast(^string)value_ptr
+            field_ptr^ = field_value
+        case runtime.Type_Info_Array:
+            unimplemented()
+        case runtime.Type_Info_Slice:
+            unimplemented()
+        case runtime.Type_Info_Dynamic_Array:
+            unimplemented()
+        case runtime.Type_Info_Struct:
+            set_fields: [dynamic]string
+            defer {
+                for field in set_fields {
+                    delete(field)
+                }
+                delete(set_fields)
             }
 
-            bfti := reflect.type_info_base(field.type)
-            #partial switch fti in bfti.variant {
-            case runtime.Type_Info_Boolean:
-                field_value := boolean(d) or_return
-                field_ptr := cast(^bool)(base + field.offset)
-                field_ptr^ = field_value
-            case runtime.Type_Info_Rune:
-                unimplemented()
-            case runtime.Type_Info_Integer:
-                unimplemented()
-            case runtime.Type_Info_Float:
-                field_value := number(d) or_return
-                field_ptr := cast(^f64)(base + field.offset) // TODO: Check size
-                field_ptr^ = field_value
-            case runtime.Type_Info_String:
-                field_value := str(d) or_return
-                field_ptr := cast(^string)(base + field.offset)
-                field_ptr^ = field_value
-            case runtime.Type_Info_Array:
-                unimplemented()
-            case runtime.Type_Info_Dynamic_Array:
-                unimplemented()
-            case runtime.Type_Info_Slice:
-                unimplemented()
-            case runtime.Type_Info_Struct:
-                field_ptr := base + field.offset
-                deserialize_object_info(d, bfti.id, fti, field_ptr, allow_partial_init) or_return
-            case runtime.Type_Info_Enum:
-                field_value := str(d) or_return
-                defer delete(field_value)
-
-                idx, found := slice.linear_search(fti.names, field_value)
-                if !found {
-                    fmt.eprintfln("Error: '%v' is not a valid value for '%v' which is an %v", field_value, k, bfti.id)
+            object_begin(d) or_return
+            for !is_object_end(d) {
+                k := key(d) or_return
+                if _, found := slice.linear_search(set_fields[:], k); found {
+                    fmt.eprintfln("Error: Duplicate key found: %v", k)
+                    delete(k)
                     return false
                 }
 
-                enum_value := fti.values[idx]
-                field_ptr := cast(^runtime.Type_Info_Enum_Value)(base + field.offset)
-                field_ptr^ = enum_value
-            case:
-                fmt.eprintfln("Error: Cannot serialize an object with a field of type `%v`", field.type)
+                append(&set_fields, k)
+
+                field := reflect.struct_field_by_name(info.id, k)
+                if field == {} {
+                    fmt.eprintfln("Error: %v does not have a member called %v", info.id, k)
+                    return false
+                }
+
+                ok = deserialize_value(d, field.type, value_ptr + field.offset, allow_partial_init)
+                if !ok {
+                    return
+                }
+            }
+            object_end(d) or_return
+
+            if !allow_partial_init && len(set_fields) != int(ti.field_count) {
+                fmt.eprintfln("Error: Not all fields given a value.") // TODO: Improve error message
                 return false
             }
-        }
-        object_end(d) or_return
+        case runtime.Type_Info_Enum:
+            field_value := str(d) or_return
+            defer delete(field_value)
 
-        if !allow_partial_init && len(set_fields) != int(info.field_count) {
-            fmt.eprintfln("Error: Not all fields given a value.") // TODO: Improve error message
-            return false
-        }
+            idx, found := slice.linear_search(ti.names, field_value)
+            if !found {
+                fmt.eprintfln("Error: '%v' is not a valid value an %v", field_value, info.id)
+                return false
+            }
 
+            enum_value := ti.values[idx]
+            field_ptr := cast(^runtime.Type_Info_Enum_Value)value_ptr
+            field_ptr^ = enum_value
+        case:
+            unreachable()
+        }
         return true
     }
 }
