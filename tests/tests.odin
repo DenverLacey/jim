@@ -508,6 +508,67 @@ deserialize_object_auto_nested :: proc(t: ^testing.T) {
 }
 
 @(test)
+deserialize_object_auto_array :: proc(t: ^testing.T) {
+    Foo :: struct {
+        array: [5]int,
+    }
+
+    json := `{"array":[1,2,3,4,5]}`
+
+    de := jim.Deserializer{input=strings.to_reader(&strings.Reader{}, json)}
+
+    foo, ok := jim.object(&de, Foo)
+
+    testing.expect(t, ok, "Failed to parse object with array using deserialize_object()")
+
+    testing.expect_value(t, foo, Foo{{1, 2, 3, 4, 5}})
+}
+
+@(test)
+deserialize_object_auto_slice :: proc(t: ^testing.T) {
+    Foo :: struct {
+        slice: []int,
+    }
+
+    json := `{"slice":[1,2,3,4,5]}`
+
+    de := jim.Deserializer{input=strings.to_reader(&strings.Reader{}, json)}
+
+    foo, ok := jim.object(&de, Foo)
+    defer delete(foo.slice)
+
+    testing.expect(t, ok, "Failed to parse object with slice using deserialize_object()")
+
+    testing.expect_value(t, len(foo.slice), 5)
+
+    for i in 1..=5 {
+        testing.expect_value(t, foo.slice[i-1], i)
+    }
+}
+
+@(test)
+deserialize_object_auto_dynamic_array :: proc(t: ^testing.T) {
+    Foo :: struct {
+        dyn: [dynamic]int,
+    }
+
+    json := `{"dyn":[1,2,3,4,5]}`
+
+    de := jim.Deserializer{input=strings.to_reader(&strings.Reader{}, json)}
+
+    foo, ok := jim.object(&de, Foo)
+    defer delete(foo.dyn)
+
+    testing.expect(t, ok, "Failed to parse object with dynamic array using deserialize_object()")
+
+    testing.expect_value(t, len(foo.dyn), 5)
+
+    for i in 1..=5 {
+        testing.expect_value(t, foo.dyn[i-1], i)
+    }
+}
+
+@(test)
 deserialize_array :: proc(t: ^testing.T) {
     json := `[true, false, 7, 1.5, "abc"]`
     de := jim.Deserializer{input = strings.to_reader(&strings.Reader{}, json)}

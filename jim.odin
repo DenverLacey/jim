@@ -484,11 +484,32 @@ when !ODIN_NO_RTTI {
             field_ptr := cast(^string)value_ptr
             field_ptr^ = field_value
         case runtime.Type_Info_Array:
-            unimplemented()
+            array_begin(d) or_return
+            for i in 0..<ti.count {
+                elem_ptr := value_ptr + uintptr(i * ti.elem_size)
+                deserialize_value(d, ti.elem, elem_ptr, allow_partial_init) or_return
+            }
+            array_end(d) or_return
         case runtime.Type_Info_Slice:
-            unimplemented()
+            b := new_array_builder(ti.elem)
+            array_begin(d) or_return
+            for !is_array_end(d) {
+                elem_ptr := array_builder_reserve(&b)
+                deserialize_value(d, ti.elem, elem_ptr, allow_partial_init) or_return
+            }
+            array_end(d) or_return
+            slice_ptr := cast(^Slice)value_ptr
+            slice_ptr^ = array_builder_to_slice(b)
         case runtime.Type_Info_Dynamic_Array:
-            unimplemented()
+            b := new_array_builder(ti.elem)
+            array_begin(d) or_return
+            for !is_array_end(d) {
+                elem_ptr := array_builder_reserve(&b)
+                deserialize_value(d, ti.elem, elem_ptr, allow_partial_init) or_return
+            }
+            array_end(d) or_return
+            dyn_ptr := cast(^Dynamic_Array)value_ptr
+            dyn_ptr^ = array_builder_to_dynamic_array(b)
         case runtime.Type_Info_Struct:
             set_fields: [dynamic]string
             defer {
@@ -886,5 +907,81 @@ next_token :: proc(d: ^Deserializer) -> (token: Token, ok: bool) {
 expect :: proc(d: ^Deserializer, kind: TokenKind) -> (token: Token, ok: bool) {
     token = next_token(d) or_return
     return token, token.kind == kind
+}
+
+@(private)
+Array_Builder :: struct {
+    elem_size: int,
+    elem_align: int,
+    count: int,
+    cap: int,
+    data: rawptr,
+}
+
+@(private)
+Slice :: struct {
+    elems: rawptr,
+    count: int,
+}
+
+@(private)
+array_builder_to_slice :: proc(b: Array_Builder) -> Slice {
+    elems, err := mem.resize(b.data, b.cap * b.elem_size, b.count * b.elem_size, b.elem_align)
+    if err != nil {
+        err_msg, _ := reflect.enum_name_from_value(err)
+        panic(err_msg)
+    }
+
+    return {
+        count = b.count,
+        elems = elems,
+    }
+}
+
+@(private)
+Dynamic_Array :: struct {
+    elems: rawptr,
+    count: int,
+    capacity: int,
+    allocator: mem.Allocator,
+}
+
+array_builder_to_dynamic_array :: proc(b: Array_Builder) -> Dynamic_Array {
+    elems, err := mem.resize(b.data, b.cap * b.elem_size, b.count * b.elem_size, b.elem_align)
+    if err != nil {
+        err_msg, _ := reflect.enum_name_from_value(err)
+        panic(err_msg)
+    }
+
+    return {
+        elems = elems,
+        count = b.count,
+        capacity = b.count,
+        allocator = context.allocator,
+    }
+}
+
+new_array_builder :: proc(elem_type: ^reflect.Type_Info) -> Array_Builder {
+    return { elem_size = elem_type.size, elem_align = elem_type.align }
+}
+
+array_builder_reserve :: proc(b: ^Array_Builder) -> uintptr {
+    if b.count >= b.cap {
+        new_cap := max(b.cap * 2, 8)
+
+        new_ptr, err := mem.resize(b.data, b.cap * b.elem_size, new_cap * b.elem_size, b.elem_align)
+        if err != nil {
+            err_msg, _ := reflect.enum_name_from_value(err)
+            panic(err_msg)
+        }
+
+        b.data = new_ptr
+        b.cap = new_cap
+    }
+
+    value_ptr := uintptr(b.data) + uintptr(b.count * b.elem_size)
+    b.count += 1
+
+    return value_ptr
 }
 
