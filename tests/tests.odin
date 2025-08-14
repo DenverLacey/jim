@@ -222,12 +222,14 @@ serialize_nested_pp :: proc(t: ^testing.T) {
 serialize_object_auto_primitive :: proc(t: ^testing.T) {
     Foo :: struct {
         char: rune,
+        integer: i32,
         number: f64,
         boolean: bool,
+        bigbool: b32,
         str: string,
     }
 
-    foo := Foo{'K', 5, true, "I'm a foo"}
+    foo := Foo{'K', -7, 5, true, false, "I'm a foo"}
 
     sb := strings.Builder{}
     defer strings.builder_destroy(&sb)
@@ -237,7 +239,7 @@ serialize_object_auto_primitive :: proc(t: ^testing.T) {
     jim.object(&se, foo)
     json := strings.to_string(sb)
 
-    testing.expect_value(t, json, `{"char":"K","number":5,"boolean":true,"str":"I'm a foo"}`)
+    testing.expect_value(t, json, `{"char":"K","integer":-7,"number":5,"boolean":true,"bigbool":false,"str":"I'm a foo"}`)
 }
 
 @(test)

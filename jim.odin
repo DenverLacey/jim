@@ -126,8 +126,7 @@ when !ODIN_NO_RTTI {
         bti := reflect.type_info_base(type_info_of(value.id))
         #partial switch ti in bti.variant {
         case runtime.Type_Info_Boolean:
-            field_value := value.(bool)
-            boolean(s, field_value)
+            serialize_any_bool(s, value)
         case runtime.Type_Info_Rune:
             field_value := value.(rune)
             buf: [4]byte
@@ -135,10 +134,9 @@ when !ODIN_NO_RTTI {
             strings.write_rune(&sb, field_value)
             str(s, strings.to_string(sb))
         case runtime.Type_Info_Integer:
-            unimplemented()
+            serialize_any_int(s, value)
         case runtime.Type_Info_Float:
-            field_value := value.(f64)
-            number(s, field_value)
+            serialize_any_float(s, value)
         case runtime.Type_Info_String:
             field_value := value.(string)
             str(s, field_value)
@@ -161,6 +159,126 @@ when !ODIN_NO_RTTI {
             name, ok := reflect.enum_name_from_value_any(value)
             assert(ok)
             str(s, name)
+        case:
+            unreachable()
+        }
+    }
+
+    @(private)
+    serialize_any_bool :: proc(s: ^Serializer, value: any) {
+        aux :: proc(s: ^Serializer, value: any, $Bool_Type: typeid) {
+            field_value := value.(Bool_Type)
+            boolean(s, bool(field_value))
+        }
+
+        switch value.id {
+        case bool:
+            aux(s, value, bool)
+        case b8:
+            aux(s, value, b8)
+        case b16:
+            aux(s, value, b16)
+        case b32:
+            aux(s, value, b32)
+        case b64:
+            aux(s, value, b64)
+        case:
+            unreachable()
+        }
+
+    }
+
+    @(private)
+    serialize_any_int :: proc(s: ^Serializer, value: any) {
+        aux :: proc(s: ^Serializer, value: any, $Int_Type: typeid) {
+            field_value := value.(Int_Type)
+            number(s, f64(field_value))
+        }
+
+        switch value.id {
+        case i16:
+            aux(s, value, i16)
+        case i16be:
+            aux(s, value, i16be)
+        case i16le:
+            aux(s, value, i16le)
+        case u16:
+            aux(s, value, u16)
+        case u16be:
+            aux(s, value, u16be)
+        case u16le:
+            aux(s, value, u16le)
+        case i32:
+            aux(s, value, i32)
+        case i32be:
+            aux(s, value, i32be)
+        case i32le:
+            aux(s, value, i32le)
+        case u32:
+            aux(s, value, u32)
+        case u32be:
+            aux(s, value, u32be)
+        case u32le:
+            aux(s, value, u32le)
+        case i64:
+            aux(s, value, i64)
+        case i64be:
+            aux(s, value, i64be)
+        case i64le:
+            aux(s, value, i64le)
+        case u64:
+            aux(s, value, u64)
+        case u64be:
+            aux(s, value, u64be)
+        case u64le:
+            aux(s, value, u64le)
+        case i128:
+            aux(s, value, i128)
+        case i128be:
+            aux(s, value, i128be)
+        case i128le:
+            aux(s, value, i128le)
+        case u128:
+            aux(s, value, u128)
+        case u128be:
+            aux(s, value, u128be)
+        case u128le:
+            aux(s, value, u128le)
+        case int:
+            aux(s, value, int)
+        case uint:
+            aux(s, value, uint)
+        case:
+            unreachable()
+        }
+    }
+
+    @(private)
+    serialize_any_float :: proc(s: ^Serializer, value: any) {
+        aux :: proc(s: ^Serializer, value: any, $Float_Type: typeid) {
+            field_value := value.(Float_Type)
+            number(s, f64(field_value))
+        }
+
+        switch value.id {
+        case f16:
+            aux(s, value, f16)
+        case f16be:
+            aux(s, value, f16be)
+        case f16le:
+            aux(s, value, f16le)
+        case f32:
+            aux(s, value, f32)
+        case f32be:
+            aux(s, value, f32be)
+        case f32le:
+            aux(s, value, f32le)
+        case f64:
+            aux(s, value, f64)
+        case f64be:
+            aux(s, value, f64be)
+        case f64le:
+            aux(s, value, f64le)
         case:
             unreachable()
         }
@@ -347,9 +465,7 @@ when !ODIN_NO_RTTI {
         bti := reflect.type_info_base(info)
         #partial switch ti in bti.variant {
         case runtime.Type_Info_Boolean:
-            field_value := boolean(d) or_return
-            field_ptr := cast(^bool)value_ptr
-            field_ptr^ = field_value
+            deserialize_any_bool(d, value_ptr, bti.size) or_return
         case runtime.Type_Info_Rune:
             field_value := str(d) or_return
             defer delete(field_value)
@@ -360,11 +476,9 @@ when !ODIN_NO_RTTI {
             field_ptr := cast(^rune)value_ptr
             field_ptr^ = utf8.rune_at(field_value, 0)
         case runtime.Type_Info_Integer:
-            unimplemented()
+            deserialize_any_int(d, value_ptr, bti.size, ti.signed, ti.endianness) or_return
         case runtime.Type_Info_Float:
-            field_value := number(d) or_return
-            field_ptr := cast(^f64)value_ptr // TODO: Check size
-            field_ptr^ = field_value
+            deserialize_any_float(d, value_ptr, bti.size, ti.endianness) or_return
         case runtime.Type_Info_String:
             field_value := str(d) or_return
             field_ptr := cast(^string)value_ptr
@@ -428,6 +542,172 @@ when !ODIN_NO_RTTI {
         case:
             unreachable()
         }
+        return true
+    }
+
+    @(private)
+    deserialize_any_bool :: proc(d: ^Deserializer, value_ptr: uintptr, size: int) -> (ok: bool) {
+        aux :: proc(d: ^Deserializer, value_ptr: uintptr, $Bool_Type: typeid) -> (ok: bool) {
+            field_ptr := cast(^Bool_Type)value_ptr
+            de_value := boolean(d) or_return
+            field_ptr^ = Bool_Type(de_value)
+            return true
+        }
+
+        switch size {
+        case 1:
+            aux(d, value_ptr, b8) or_return
+        case 2:
+            aux(d, value_ptr, b16) or_return
+        case 4:
+            aux(d, value_ptr, b32) or_return
+        case 8:
+            aux(d, value_ptr, b64) or_return
+        case:
+            unreachable()
+        }
+
+        return true
+    }
+
+    @(private)
+    deserialize_any_int :: proc(d: ^Deserializer, value_ptr: uintptr, size: int, signed: bool, endianness: runtime.Platform_Endianness) -> (ok: bool) {
+        aux :: proc(d: ^Deserializer, value_ptr: uintptr, $Int_Type: typeid) -> (ok: bool) {
+            field_ptr := cast(^Int_Type)value_ptr
+            de_value := number(d) or_return
+            field_ptr^ = Int_Type(de_value)
+            return true
+        }
+
+        switch size {
+        case 2:
+            if signed {
+                switch endianness {
+                case .Platform:
+                    aux(d, value_ptr, i16) or_return
+                case .Big:
+                    aux(d, value_ptr, i16be) or_return
+                case .Little:
+                    aux(d, value_ptr, i16le) or_return
+                }
+            } else {
+                switch endianness {
+                case .Platform:
+                    aux(d, value_ptr, u16) or_return
+                case .Big:
+                    aux(d, value_ptr, u16be) or_return
+                case .Little:
+                    aux(d, value_ptr, u16le) or_return
+                }
+            }
+        case 4:
+            if signed {
+                switch endianness {
+                case .Platform:
+                    aux(d, value_ptr, i32) or_return
+                case .Big:
+                    aux(d, value_ptr, i32be) or_return
+                case .Little:
+                    aux(d, value_ptr, i32le) or_return
+                }
+            } else {
+                switch endianness {
+                case .Platform:
+                    aux(d, value_ptr, u32) or_return
+                case .Big:
+                    aux(d, value_ptr, u32be) or_return
+                case .Little:
+                    aux(d, value_ptr, u32le) or_return
+                }
+            }
+        case 8:
+            if signed {
+                switch endianness {
+                case .Platform:
+                    aux(d, value_ptr, i64) or_return
+                case .Big:
+                    aux(d, value_ptr, i64be) or_return
+                case .Little:
+                    aux(d, value_ptr, i64le) or_return
+                }
+            } else {
+                switch endianness {
+                case .Platform:
+                    aux(d, value_ptr, u64) or_return
+                case .Big:
+                    aux(d, value_ptr, u64be) or_return
+                case .Little:
+                    aux(d, value_ptr, u64le) or_return
+                }
+            }
+        case 16:
+            if signed {
+                switch endianness {
+                case .Platform:
+                    aux(d, value_ptr, i128) or_return
+                case .Big:
+                    aux(d, value_ptr, i128be) or_return
+                case .Little:
+                    aux(d, value_ptr, i128le) or_return
+                }
+            } else {
+                switch endianness {
+                case .Platform:
+                    aux(d, value_ptr, u128) or_return
+                case .Big:
+                    aux(d, value_ptr, u128be) or_return
+                case .Little:
+                    aux(d, value_ptr, u128le) or_return
+                }
+            }
+        case:
+            unreachable()
+        }
+
+        return true
+    }
+
+    @(private)
+    deserialize_any_float :: proc(d: ^Deserializer, value_ptr: uintptr, size: int, endianness: runtime.Platform_Endianness) -> (ok: bool) {
+        aux :: proc(d: ^Deserializer, value_ptr: uintptr, $Float_Type: typeid) -> (ok: bool) {
+            field_ptr := cast(^Float_Type)value_ptr
+            de_value := number(d) or_return
+            field_ptr^ = Float_Type(de_value)
+            return true
+        }
+
+        switch size {
+        case 2:
+            switch endianness {
+            case .Platform:
+                aux(d, value_ptr, f16) or_return
+            case .Big:
+                aux(d, value_ptr, f16be) or_return
+            case .Little:
+                aux(d, value_ptr, f16le) or_return
+            }
+        case 4:
+            switch endianness {
+            case .Platform:
+                aux(d, value_ptr, f32) or_return
+            case .Big:
+                aux(d, value_ptr, f32be) or_return
+            case .Little:
+                aux(d, value_ptr, f32le) or_return
+            }
+        case 8:
+            switch endianness {
+            case .Platform:
+                aux(d, value_ptr, f64) or_return
+            case .Big:
+                aux(d, value_ptr, f64be) or_return
+            case .Little:
+                aux(d, value_ptr, f64le) or_return
+            }
+        case:
+            unreachable()
+        }
+
         return true
     }
 }
