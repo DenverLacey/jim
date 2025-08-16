@@ -142,6 +142,77 @@ serialize_array_pp :: proc(t: ^testing.T) {
 }
 
 @(test)
+serialize_array_auto :: proc(t: ^testing.T) {
+    sb := strings.Builder{}
+    defer strings.builder_destroy(&sb)
+
+    se := jim.Serializer{out=strings.to_writer(&sb)}
+
+    x := [?]int{ 1, 4, 9, 11, 13 }
+    jim.array(&se, x)
+
+    json := strings.to_string(sb)
+    testing.expect_value(t, json, "[1,4,9,11,13]")
+}
+
+@(test)
+serialize_array_auto_slice :: proc(t: ^testing.T) {
+    sb := strings.Builder{}
+    defer strings.builder_destroy(&sb)
+
+    se := jim.Serializer{out=strings.to_writer(&sb)}
+
+    x := []int{ 1, 4, 9, 11, 13 }
+    jim.array(&se, x)
+
+    json := strings.to_string(sb)
+    testing.expect_value(t, json, "[1,4,9,11,13]")
+}
+
+@(test)
+serialize_array_auto_dynamic_array :: proc(t: ^testing.T) {
+    sb := strings.Builder{}
+    defer strings.builder_destroy(&sb)
+
+    se := jim.Serializer{out=strings.to_writer(&sb)}
+
+    x := [dynamic]int{ 1, 4, 9, 11, 13 }
+    defer delete(x)
+
+    jim.array(&se, x)
+
+    json := strings.to_string(sb)
+    testing.expect_value(t, json, "[1,4,9,11,13]")
+}
+
+@(test)
+serialize_array_auto_enumerated_array :: proc(t: ^testing.T) {
+    Direction :: enum {
+        Up,
+        Down,
+        Left,
+        Right
+    }
+
+    x := [Direction][2]f32 {
+        .Up    = {  0,  1 },
+        .Down  = {  0, -1 },
+        .Left  = { -1,  0 },
+        .Right = {  1,  0 },
+    }
+
+    sb := strings.Builder{}
+    defer strings.builder_destroy(&sb)
+
+    se := jim.Serializer{out=strings.to_writer(&sb)}
+
+    jim.array(&se, x)
+
+    json := strings.to_string(sb)
+    testing.expect_value(t, json, `{"Up":[0,1],"Down":[0,-1],"Left":[-1,0],"Right":[1,0]}`)
+}
+
+@(test)
 serialize_nested :: proc(t: ^testing.T) {
     sb := strings.Builder{}
     defer strings.builder_destroy(&sb)
@@ -662,6 +733,44 @@ deserialize_array_pp :: proc(t: ^testing.T) {
 
     ok = jim.array_end(&de)
     testing.expect(t, ok, "Failed to find ending of array")
+}
+
+@(test)
+deserialize_array_auto :: proc(t: ^testing.T) {
+}
+
+@(test)
+deserialize_array_auto_slice :: proc(t: ^testing.T) {
+}
+
+@(test)
+deserialize_array_auto_dynamic_array :: proc(t: ^testing.T) {
+}
+
+@(test)
+deserialize_array_auto_enumerated_array :: proc(t: ^testing.T) {
+    Direction :: enum {
+        Up,
+        Down,
+        Left,
+        Right,
+    }
+
+    json := `{"Up":[0,1],"Down":[0,-1],"Left":[-1,0],"Right":[1,0]}`
+
+    de := jim.Deserializer{input=strings.to_reader(&strings.Reader{}, json)}
+
+    value, ok := jim.array(&de, [Direction][2]f32)
+
+    expected := [Direction][2]f32 {
+        .Up    = {  0,  1 },
+        .Down  = {  0, -1 },
+        .Left  = { -1,  0 },
+        .Right = {  1,  0 },
+    }
+
+    testing.expect(t, ok, "Failed to parse enumerated array")
+    testing.expect_value(t, value, expected)
 }
 
 @(test)

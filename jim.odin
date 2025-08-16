@@ -24,6 +24,7 @@ str          :: proc{serialize_str, serialize_enum_str, deserialize_str, deseria
 
 when !ODIN_NO_RTTI {
     object :: proc{serialize_object, deserialize_object}
+    array :: proc{serialize_array, deserialize_array}
 }
 
 Serializer :: struct {
@@ -121,6 +122,15 @@ when !ODIN_NO_RTTI {
         serialize_any(s, value)
     }
 
+    serialize_array :: proc(s: ^Serializer, value: $T, caller := #caller_location) {
+        format_for_array_if_needed(s)
+        ti := reflect.type_info_base(type_info_of(T))
+        if !type_is_serializable(ti) || !type_is_array_like(ti) {
+            panic("Tried to serialize an array that cannot be serialized.", caller)
+        }
+        serialize_any(s, value)
+    }
+
     @(private)
     serialize_any :: proc(s: ^Serializer, value: any) {
         bti := reflect.type_info_base(type_info_of(value.id))
@@ -147,6 +157,20 @@ when !ODIN_NO_RTTI {
                 serialize_any(s, elem)
             }
             array_end(s)
+        case runtime.Type_Info_Enumerated_Array:
+            enum_type := reflect.type_info_base(ti.index).variant.(reflect.Type_Info_Enum)
+
+            object_begin(s)
+            for i in 0..<ti.count {
+                it := runtime.Type_Info_Enum_Value(i)
+                index := slice.linear_search(enum_type.values, it) or_continue
+
+                key(s, enum_type.names[index])
+
+                elem_ptr := uintptr(value.data) + uintptr(i * ti.elem_size)
+                serialize_any(s, any{rawptr(elem_ptr), ti.elem.id})
+            }
+            object_end(s)
         case runtime.Type_Info_Struct:
             object_begin(s)
             for i in 0..<ti.field_count {
@@ -348,6 +372,8 @@ type_is_serializable :: proc(T: ^runtime.Type_Info) -> bool {
         return type_is_serializable(ti.elem)
     case runtime.Type_Info_Slice:
         return type_is_serializable(ti.elem)
+    case runtime.Type_Info_Enumerated_Array:
+        return type_is_serializable(ti.elem)
     case runtime.Type_Info_Struct:
         for i in 0..<ti.field_count {
             field_type := reflect.type_info_base(ti.types[i])
@@ -364,6 +390,11 @@ type_is_serializable :: proc(T: ^runtime.Type_Info) -> bool {
     return true
 }
 
+@(private)
+type_is_array_like :: proc(T: ^runtime.Type_Info) -> bool {
+    return reflect.is_array(T) || reflect.is_dynamic_array(T) || reflect.is_slice(T) || reflect.is_enumerated_array(T)
+}
+
 Deserializer :: struct {
     input: io.Reader,
     _peeked_char: rune,
@@ -375,9 +406,10 @@ deserialize_object_begin :: proc(d: ^Deserializer) -> bool {
     return ok
 }
 
-deserialize_object_end :: proc(d: ^Deserializer) -> bool {
-    _, ok := expect(d, .CCURLY)
-    return ok
+deserialize_object_end :: proc(d: ^Deserializer) -> (ok: bool) {
+    expect(d, .CCURLY) or_return
+    eat_char(d, ',')
+    return true
 }
 
 deserialize_array_begin :: proc(d: ^Deserializer) -> bool {
@@ -385,9 +417,10 @@ deserialize_array_begin :: proc(d: ^Deserializer) -> bool {
     return ok
 }
 
-deserialize_array_end :: proc(d: ^Deserializer) -> bool {
-    _, ok := expect(d, .CBRACKET)
-    return ok
+deserialize_array_end :: proc(d: ^Deserializer) -> (ok: bool) {
+    expect(d, .CBRACKET) or_return
+    eat_char(d, ',')
+    return true
 }
 
 is_object_end :: proc(d: ^Deserializer) -> bool {
@@ -412,7 +445,7 @@ deserialize_key :: proc(d: ^Deserializer) -> (key: string, ok: bool) {
 
 deserialize_boolean :: proc(d: ^Deserializer) -> (value: bool, ok: bool) {
     tok := next_token(d) or_return
-    eat_char(d, ',') or_return
+    eat_char(d, ',')
 
     #partial switch tok.kind {
     case .TRUE:
@@ -426,7 +459,7 @@ deserialize_boolean :: proc(d: ^Deserializer) -> (value: bool, ok: bool) {
 
 deserialize_number :: proc(d: ^Deserializer) -> (value: f64, ok: bool) {
     tok := expect(d, .NUMBER) or_return
-    eat_char(d, ',') or_return
+    eat_char(d, ',')
 
     value = strconv.atof(string(tok.text[:tok.len]))
     return value, true
@@ -434,7 +467,7 @@ deserialize_number :: proc(d: ^Deserializer) -> (value: f64, ok: bool) {
 
 deserialize_str :: proc(d: ^Deserializer) -> (value: string, ok: bool) {
     tok := expect(d, .STRING) or_return
-    eat_char(d, ',') or_return
+    eat_char(d, ',')
     res, err := strings.clone(string(tok.text[:tok.len]))
     if err != nil {
         return "", false
@@ -457,6 +490,15 @@ when !ODIN_NO_RTTI {
             panic("Tried to deserialize an object that cannot be deserialized.", caller)
         }
         ok = deserialize_value(d, ti, auto_cast &value, allow_partial_init)
+        return
+    }
+
+    deserialize_array :: proc(d: ^Deserializer, $T: typeid, caller := #caller_location) -> (value: T, ok: bool) {
+        ti := reflect.type_info_base(type_info_of(T))
+        if !type_is_serializable(ti) || !type_is_array_like(ti) {
+            panic("Tried to deserialize an array that cannot be deserialized.", caller)
+        }
+        ok = deserialize_value(d, ti, auto_cast &value, allow_partial_init=false)
         return
     }
 
@@ -510,6 +552,23 @@ when !ODIN_NO_RTTI {
             array_end(d) or_return
             dyn_ptr := cast(^Dynamic_Array)value_ptr
             dyn_ptr^ = array_builder_to_dynamic_array(b)
+        case runtime.Type_Info_Enumerated_Array:
+            enum_type := reflect.type_info_base(ti.index).variant.(reflect.Type_Info_Enum)
+
+            object_begin(d) or_return
+            for !is_object_end(d) {
+                it := key(d) or_return
+                defer delete(it)
+
+                index := slice.linear_search(enum_type.names, it) or_return
+                elem_value := enum_type.values[index]
+
+                offset := int(elem_value) * ti.elem_size
+
+                elem_ptr := value_ptr + uintptr(offset)
+                deserialize_value(d, ti.elem, elem_ptr, allow_partial_init) or_return
+            }
+            object_end(d) or_return
         case runtime.Type_Info_Struct:
             set_fields: [dynamic]string
             defer {
@@ -794,14 +853,14 @@ skip_whitespace :: proc(d: ^Deserializer) -> (c: rune, ok: bool) {
 }
 
 @(private)
-eat_char :: proc(d: ^Deserializer, ch: rune) -> (ok: bool) {
-    c := skip_whitespace(d) or_return
+eat_char :: proc(d: ^Deserializer, ch: rune) {
+    c, ok := skip_whitespace(d)
+    if !ok { return }
     if c == ch {
-        return true
+        return
     }
     d._peeked_char = c
     d._peeked = true
-    return true
 }
 
 @(private)
@@ -874,10 +933,16 @@ next_token :: proc(d: ^Deserializer) -> (token: Token, ok: bool) {
             case:
                 return token, false
             }
-        } else if unicode.is_digit(c) {
+        } else if unicode.is_digit(c) || c == '-' {
+            // fmt.printfln("[PARSE NUM] begin")
+            if c == '-' {
+                eat_char(d, '-')
+                // fmt.printfln("[PARSE NUM] eat leading -")
+            }
             dot := false
             for {
                 c := peek_char(d) or_return
+                // fmt.printfln("[PARSE NUM] c = '%v'", c)
 
                 if c == '.' && !dot {
                     dot = true
@@ -893,10 +958,14 @@ next_token :: proc(d: ^Deserializer) -> (token: Token, ok: bool) {
                 next_char(d)
             }
 
+            // fmt.printfln("[PARSE NUM] end: %s", sb.buf)
             token.kind = .NUMBER
             token.len = strings.builder_len(sb)
         } else {
-            unimplemented()
+            sb := strings.Builder{}
+            fmt.sbprintf(&sb, "unhandled character in parser: '%v'", c)
+            msg := strings.to_string(sb)
+            unimplemented(msg)
         }
     }
 
