@@ -175,7 +175,12 @@ when !ODIN_NO_RTTI {
             object_begin(s)
             for i in 0..<ti.field_count {
                 field := reflect.struct_field_at(bti.id, int(i))
-                key(s, field.name)
+                if json_name, ok := reflect.struct_tag_lookup(field.tag, "json"); ok {
+                    // TODO: Handle omitempty to imrpove parity with encoding/json package
+                    key(s, json_name)
+                } else {
+                    key(s, field.name)
+                }
                 serialize_any(s, reflect.struct_field_value(value, field))
             }
             object_end(s)
@@ -397,6 +402,7 @@ type_is_array_like :: proc(T: ^runtime.Type_Info) -> bool {
 
 Deserializer :: struct {
     input: io.Reader,
+    _offset: int,
     _peeked_char: rune,
     _peeked: bool,
 }
@@ -571,29 +577,25 @@ when !ODIN_NO_RTTI {
             object_end(d) or_return
         case runtime.Type_Info_Struct:
             set_fields: [dynamic]string
-            defer {
-                for field in set_fields {
-                    delete(field)
-                }
-                delete(set_fields)
-            }
+            defer delete(set_fields)
 
             object_begin(d) or_return
             for !is_object_end(d) {
                 k := key(d) or_return
-                if _, found := slice.linear_search(set_fields[:], k); found {
-                    fmt.eprintfln("Error: Duplicate key found: %v", k)
-                    delete(k)
-                    return false
-                }
+                defer delete(k)
 
-                append(&set_fields, k)
-
-                field := reflect.struct_field_by_name(info.id, k)
-                if field == {} {
+                field, k_ok := get_struct_field(k, ti)
+                if !k_ok {
                     fmt.eprintfln("Error: %v does not have a member called %v", info.id, k)
                     return false
                 }
+
+                if _, found := slice.linear_search(set_fields[:], field.name); found {
+                    fmt.eprintfln("Error: Duplicate key found: %v", field.name)
+                    return false
+                }
+
+                append(&set_fields, field.name)
 
                 ok = deserialize_value(d, field.type, value_ptr + field.offset, allow_partial_init)
                 if !ok {
@@ -790,6 +792,28 @@ when !ODIN_NO_RTTI {
 
         return true
     }
+
+    @(private)
+    get_struct_field :: proc(key: string, ti: reflect.Type_Info_Struct) -> (field: reflect.Struct_Field, ok: bool) {
+        for i in 0..<ti.field_count {
+            tag := reflect.Struct_Tag(ti.tags[i])
+            name := ti.names[i]
+            if json_name, ok := reflect.struct_tag_lookup(tag, "json"); ok {
+                // TODO: Handle omitempty
+                name = json_name
+            }
+            if key == name {
+                return reflect.Struct_Field {
+                    name = name,
+                    type = ti.types[i],
+                    tag = tag,
+                    offset = ti.offsets[i],
+                    is_using = ti.usings[i],
+                }, true
+            }
+        }
+        return
+    }
 }
 
 TokenKind :: enum {
@@ -830,6 +854,7 @@ peek_char :: proc(d: ^Deserializer) -> (c: rune, ok: bool) {
         return 0, false
     }
 
+    d._offset += 1
     d._peeked_char = r
     d._peeked = true
     return r, true
@@ -962,10 +987,7 @@ next_token :: proc(d: ^Deserializer) -> (token: Token, ok: bool) {
             token.kind = .NUMBER
             token.len = strings.builder_len(sb)
         } else {
-            sb := strings.Builder{}
-            fmt.sbprintf(&sb, "unhandled character in parser: '%v'", c)
-            msg := strings.to_string(sb)
-            unimplemented(msg)
+            fmt.eprintfln("Invalid token in JSON input: %v", c)
         }
     }
 

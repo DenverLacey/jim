@@ -387,6 +387,25 @@ serialize_object_auto_array :: proc(t: ^testing.T) {
 }
 
 @(test)
+serialize_object_with_tags :: proc(t: ^testing.T) {
+    Foo :: struct {
+        field: int `json:"foo-field"`
+    }
+
+    foo := Foo{field=10}
+
+    sb := strings.Builder{}
+    defer strings.builder_destroy(&sb)
+
+    se := jim.Serializer{out=strings.to_writer(&sb)}
+
+    jim.object(&se, foo)
+    json := strings.to_string(sb)
+
+    testing.expect_value(t, json, `{"foo-field":10}`)
+}
+
+@(test)
 deserialize_empty_object :: proc(t: ^testing.T) {
     json := "{}"
     de := jim.Deserializer{input = strings.to_reader(&strings.Reader{}, json)}
@@ -637,6 +656,20 @@ deserialize_object_auto_dynamic_array :: proc(t: ^testing.T) {
     for i in 1..=5 {
         testing.expect_value(t, foo.dyn[i-1], i)
     }
+}
+
+@(test)
+deserialize_object_with_tags :: proc(t: ^testing.T) {
+    Foo :: struct {
+        field: int `json:"foo-field"`
+    }
+
+    json :=  `{"foo-field":10}`
+    de := jim.Deserializer{input=strings.to_reader(&strings.Reader{}, json)}
+
+    foo, ok := jim.object(&de, Foo)
+    testing.expect(t, ok, "Failed to parse object with tags")
+    testing.expect_value(t, foo, Foo{field=10})
 }
 
 @(test)
